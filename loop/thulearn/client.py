@@ -1,10 +1,8 @@
-#!/usr/bin/env python3
+# Adapted from AutoThu (MIT), snapshot b5caba55ba2a53fcd1e08db1a5fab0d01231a39f.
+# Copyright (c) 2026 AutoThu contributors. See third_party/AutoThu-LICENSE.
 """
-清华网络学堂 HTTP 客户端（基于已验证的 thulearn2018 API 端点）。
-
-登录说明（2025+）：
-- 旧端点 id.tsinghua POST .../login/post/... 已返回「该应用不允许调用登录接口」
-- 推荐：浏览器登录后导入 session.json，或使用 learn reset + 信任浏览器
+清华网络学堂 HTTP 客户端。端点沿用 AutoThu 对 thulearn2018 的验证结果，
+不依赖该包。登录由 AvatarTHU 内置的浏览器认证入口完成。
 """
 from __future__ import annotations
 
@@ -18,15 +16,6 @@ import requests
 
 # 与 thulearn2018/settings.py 一致（源码验证）
 BASE = "https://learn.tsinghua.edu.cn/"
-LOGIN_ID_LEGACY = (
-    "https://id.tsinghua.edu.cn/do/off/ui/auth/login/post/"
-    "bb5df85216504820be7bba2b0ae1535b/0?/login.do"
-)
-LOGIN_FORM = (
-    "https://id.tsinghua.edu.cn/do/off/ui/auth/login/form/"
-    "bb5df85216504820be7bba2b0ae1535b/0"
-)
-LOGIN_ROAMING = BASE + "b/j_spring_security_thauth_roaming_entry"
 SEMESTER_URL = BASE + "b/kc/zhjw_v_code_xnxq/getCurrentAndNextSemester"
 
 DEFAULT_HEADERS = {
@@ -124,12 +113,12 @@ class ThuLearnClient:
     @staticmethod
     def _json(response):
         if response.status_code in (401, 403):
-            raise SessionExpired('网络学堂会话失效，请运行 thu-learn login')
+            raise SessionExpired('网络学堂会话失效，请运行 ./avatarthu login thu')
         response.raise_for_status()
         try:
             return response.json()
         except ValueError as exc:
-            raise SessionExpired('网络学堂返回登录页面，请运行 thu-learn login') from exc
+            raise SessionExpired('网络学堂返回登录页面，请运行 ./avatarthu login thu') from exc
 
     def get_json(self, url: str, params: dict | None = None) -> Any:
         p = dict(params or {})
@@ -154,7 +143,7 @@ class ThuLearnClient:
             if not isinstance(self.semester_id, str) or not self.semester_id:
                 raise ValueError('missing semester')
         except (KeyError, TypeError, ValueError) as exc:
-            raise SessionExpired('无法验证网络学堂登录态，请运行 thu-learn login') from exc
+            raise SessionExpired('无法验证网络学堂登录态，请运行 ./avatarthu login thu') from exc
         return self.semester_id
 
     def list_courses(self, semester_id: str | None = None) -> list[dict]:
@@ -162,7 +151,7 @@ class ThuLearnClient:
         # thulearn2018 使用 POST（非 GET）
         data = self.post_json(lessons_url(sid), data={})
         if not isinstance(data, dict) or not isinstance(data.get('resultList'), list):
-            raise SessionExpired('无法读取课程列表，请运行 thu-learn login')
+            raise SessionExpired('无法读取课程列表，请运行 ./avatarthu login thu')
         return data['resultList']
 
     def persist(self) -> bool:
@@ -200,16 +189,3 @@ class ThuLearnClient:
             return True
         except Exception:
             return False
-
-
-def save_session_template(path: Path) -> None:
-    """写入 session 文件格式说明模板。"""
-    template = {
-        "username": "学号",
-        "cookies": {
-            "JSESSIONID": "从浏览器导出",
-            "XSRF-TOKEN": "从浏览器导出",
-        },
-        "note": "在 learn.tsinghua.edu.cn 登录后，用浏览器开发者工具复制 Cookie",
-    }
-    path.write_text(json.dumps(template, ensure_ascii=False, indent=2), encoding="utf-8")

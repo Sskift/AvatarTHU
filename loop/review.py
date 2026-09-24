@@ -72,7 +72,7 @@ def input_attachments(st):
     return files
 
 
-def build(st, draft):
+def build(st, draft, *, local=False):
     """Four review sections, selected evidence, and every frozen file in the doc."""
     base = c.OUT / st['task_id'] / f'r{st["revision"]}'
     paths = []
@@ -195,12 +195,19 @@ def build(st, draft):
             blocks += ['<h2>' + title + '</h2>']
             blocks += [attach(p) for p in group]
     blocks += ['<h2>执行自查记录</h2>', paragraph('由完成作业的同一会话撰写，包含运行命令、结果与未完成项。'), attach(report)]
-    blocks += ['<h1>四、审阅与操作</h1>',
+    if local:
+        instructions = ('<ol><li><b>对照要求。</b>阅读第一部分的描述与原题，确认完成范围。</li>'
+                        '<li><b>检查产物。</b>查看关键结果，打开第三部分的完整文件和自查记录。</li>'
+                        '<li><b>提出修改。</b>运行 ./avatarthu revise ' + esc(st['task_id'])
+                        + ' --feedback &quot;修改意见&quot;，下一次调度会生成新版。</li>'
+                        '<li><b>确认提交。</b>纯本地模式请自行在网络学堂网页提交；启用飞书后可通过当前版本卡片决定提交。</li></ol>')
+    else:
+        instructions = (
                '<ol><li><b>对照要求。</b>阅读第一部分的描述与原题，确认完成范围。</li>'
                '<li><b>检查产物。</b>查看关键结果，再打开第三部分的报告、源码或程序核对细节。</li>'
                '<li><b>提出修改。</b>在本文相关段落或图片添加批注，回到本版卡片点击“按文档批注修改”；也可直接在卡片填写意见。</li>'
-               '<li><b>确认提交。</b>审阅完成后，由本人在本版卡片选择提交。</li></ol>',
-               paragraph('直接编辑审阅文档不会改变待提交文件。')]
+               '<li><b>确认提交。</b>审阅完成后，由本人在本版卡片选择提交。</li></ol>')
+    blocks += ['<h1>四、审阅与操作</h1>', instructions, paragraph('直接编辑审阅文档不会改变待提交文件。')]
     marker = f'版本标识：{st["task_id"]} / r{st["revision"]} / {st.get("sha256") or "无提交包"}'
     blocks += [paragraph(marker)]
     draft.write_text('\n'.join(blocks), encoding='utf-8')

@@ -1,10 +1,9 @@
-"""AutoThu authentication plus checked, incremental Web Learning downloads."""
+"""Built-in authentication plus checked, incremental Web Learning downloads."""
 from __future__ import annotations
 import base64
 import json
 import os
 import re
-import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -16,8 +15,7 @@ BASE = 'https://learn.tsinghua.edu.cn'
 
 
 def client():
-    sys.path.insert(0, str(ROOT / 'autothu' / 'scripts'))
-    from thu_learn_client import ThuLearnClient
+    from .thulearn.client import ThuLearnClient
     c = ThuLearnClient.from_session_file(config()['session'])
     c.warmup()
     c.get_current_semester()

@@ -5,7 +5,7 @@ import shutil
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from .common import DATA, OUT, digest, fingerprint, inside, lark, lock, now, read_json, save_task, send, write_json
+from .common import DATA, OUT, digest, fingerprint, inside, lark, lark_enabled, lock, now, read_json, save_task, send, write_json
 
 
 from .cards import assignment as card, notice_digest
@@ -48,10 +48,19 @@ def snapshot(st, result, job):
               submission=str(submit_file) if submit_file else None,
               sha256=digest(submit_file) if submit_file else None, nonce=secrets.token_hex(16),
               deliveries={}, review_doc={}, links_synced=False, links_retry_at=None, status='delivery_pending')
+    for key in ('card_message_id', 'chat_id', 'local_review', 'delivery_mode'):
+        st.pop(key, None)
     save_task(st)
 
 
 def deliver(st):
+    if not lark_enabled():
+        from .local_review import publish as local_publish
+        local_publish(st)
+        st.update(status='awaiting' if st['ready'] else 'needs_student', delivery_mode='local')
+        save_task(st)
+        print('本地审阅：' + st['local_review'], flush=True)
+        return
     # The document owns all artifacts; only the approval card goes to the chat.
     publish(st)
     if 'card' not in st['deliveries']:
@@ -60,17 +69,26 @@ def deliver(st):
         st['card_message_id'] = response['message_id']
         st['chat_id'] = response.get('chat_id')
     st['status'] = 'awaiting' if st['ready'] else 'needs_student'
+    st['delivery_mode'] = 'lark'
     save_task(st)
 
 
 def refresh_card_links(st):
     """Finish document delivery and refresh the existing approval card in place."""
+    if not lark_enabled():
+        if not st.get('local_review') or not Path(st['local_review']).is_file():
+            from .local_review import publish as local_publish
+            local_publish(st)
+        return
     if st.get('status') not in {'awaiting', 'needs_student'} or (st.get('links_synced') and st.get('review_doc', {}).get('verified')):
         return
     if st.get('links_retry_at') and now() < datetime.fromisoformat(st['links_retry_at']):
         return
     st['links_retry_at'] = (now() + timedelta(minutes=15)).isoformat()
     save_task(st)
+    if not st.get('card_message_id'):
+        deliver(st)
+        return
     publish(st)
     lark('im', 'messages', 'patch', '--as', 'bot', '--message-id', st['card_message_id'],
          '--data', json.dumps({'content': json.dumps(card(st), ensure_ascii=False)}, ensure_ascii=False))
@@ -80,6 +98,10 @@ def refresh_card_links(st):
 
 def send_notices(notices, mark_read):
     """Commit the delivery receipt before marking read; resume only the failed step."""
+    if not lark_enabled():
+        # learn.announcements has already archived the original notice locally.
+        # No Feishu receipt means no permission to mark it read, even on retries.
+        return 0
     state_path = DATA / 'notices.json'
     acknowledged = read_json(state_path)
     count = 0

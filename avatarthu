@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+AVATAR_RUNTIME="${AVATARTHU_HOME:-$HOME/.local/share/avatarthu}"
+if [[ ! -x "$AVATAR_RUNTIME/.venv/bin/python" ]]; then
+  echo '请先在项目目录运行 ./setup.sh 安装 AvatarTHU。' >&2
+  exit 1
+fi
+export AVATARTHU_HOME="$AVATAR_RUNTIME"
+cd "$AVATAR_RUNTIME"
+exec "$AVATAR_RUNTIME/.venv/bin/python" -m loop.cli "$@"

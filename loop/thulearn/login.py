@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# Adapted from AutoThu (MIT), snapshot b5caba55ba2a53fcd1e08db1a5fab0d01231a39f.
+# Copyright (c) 2026 AutoThu contributors. See third_party/AutoThu-LICENSE.
 """Import the current macOS Google Chrome learn.tsinghua.edu.cn session."""
 from __future__ import annotations
 
@@ -71,7 +72,7 @@ def browser_login_cookies() -> dict[str, str]:
         from selenium import webdriver
         from selenium.webdriver.support.ui import WebDriverWait
     except ImportError as exc:
-        raise RuntimeError("Mac 浏览器登录需要 Selenium；请重新安装 AutoThu 依赖。") from exc
+        raise RuntimeError("Mac 浏览器登录需要 Selenium；请重新运行 ./setup.sh 安装依赖。") from exc
 
     options = webdriver.ChromeOptions()
     options.add_argument("--no-first-run")
@@ -96,7 +97,7 @@ def browser_login_cookies() -> dict[str, str]:
 
 
 def save_session(target: Path, cookies: dict[str, str]) -> None:
-    from thu_learn_client import ThuLearnClient
+    from .client import ThuLearnClient, school_domain
 
     missing = {"JSESSIONID", "XSRF-TOKEN"} - cookies.keys()
     if missing:
@@ -111,7 +112,11 @@ def save_session(target: Path, cookies: dict[str, str]) -> None:
 
     target = target.expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps({"cookies": cookies}, ensure_ascii=False, indent=2) + "\n"
+    # The verification request can rotate the session; keep its accepted cookies.
+    payload = json.dumps({'all_cookies': [{'name': item.name, 'value': item.value,
+                          'domain': item.domain, 'path': item.path or '/'}
+                         for item in probe.session.cookies if school_domain(item.domain)]},
+                         ensure_ascii=False, indent=2) + '\n'
     with target.with_suffix(target.suffix + '.lock').open('a') as guard:
         fcntl.flock(guard, fcntl.LOCK_EX)
         fd, tmp_name = tempfile.mkstemp(prefix=".session-", dir=target.parent)
@@ -145,27 +150,15 @@ def import_chrome_cookies() -> dict[str, str]:
             for host, name, plain, encrypted in rows}
 
 
-def main() -> int:
-    target = Path(os.environ.get("AUTOTHU_SESSION", Path.home() / ".config/autothu/session.json")).expanduser()
+def login(target: Path, *, import_only=False) -> None:
+    """Import a valid session, or let the owner finish SSO in a Chrome window."""
     try:
-        try:
-            cookies = import_chrome_cookies()
-            save_session(target, cookies)
-        except Exception as import_error:
-            if '--import-only' in sys.argv:
-                raise RuntimeError('Chrome 会话不可用，请先在 Chrome 完成网络学堂登录。') from import_error
-            print(f"无法导入现有 Chrome 会话（{import_error}）。改用独立登录窗口。")
-            cookies = browser_login_cookies()
-            save_session(target, cookies)
-        print(f"登录成功，AutoThu 会话已保存：{target}")
-        return 0
-    except subprocess.CalledProcessError:
-        print("Chrome 安全存储读取失败；可以在独立登录窗口重新登录。", file=sys.stderr)
-        return 1
+        if sys.platform != 'darwin':
+            raise RuntimeError('Chrome 会话导入仅支持 macOS')
+        save_session(target, import_chrome_cookies())
     except Exception as exc:
-        print(f"登录失败：{exc}", file=sys.stderr)
-        return 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        if import_only:
+            raise RuntimeError('Chrome 会话不可用，请先在 Chrome 完成网络学堂登录。') from exc
+        print('现有 Chrome 登录态不可用，将打开网络学堂登录窗口。', flush=True)
+        save_session(target, browser_login_cookies())
+    print(f'登录成功，AvatarTHU 会话已保存：{target}', flush=True)

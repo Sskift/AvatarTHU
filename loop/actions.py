@@ -2,7 +2,7 @@
 import hmac
 import json
 from pathlib import Path
-from .common import DATA, config, digest, inside, lock, now, read_json, safe_error, save_task, send, task_path, tasks, write_json
+from .common import DATA, config, digest, inside, lark_enabled, lock, now, read_json, safe_error, save_task, send, task_path, tasks, write_json
 from . import learn
 from .cards import receipt
 
@@ -27,7 +27,7 @@ def send_submission_receipt(st):
 
 
 def act(event):
-    if event.get('operator_id') != config()['lark_user_id'] or not event.get('event_id'):
+    if not lark_enabled() or event.get('operator_id') != config().get('lark_user_id') or not event.get('event_id'):
         return False
     value = event.get('action_value') or '{}'
     if isinstance(value, str):

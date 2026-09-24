@@ -6,7 +6,8 @@ from .cards import receipt
 
 
 def act(event):
-    if event.get('sender_id') != config()['lark_user_id'] or not event.get('message_id'):
+    from .common import lark_enabled
+    if not lark_enabled() or event.get('sender_id') != config().get('lark_user_id') or not event.get('message_id'):
         return False
     content = event.get('content', '')
     try:

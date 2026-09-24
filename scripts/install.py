@@ -1,127 +1,105 @@
 #!/usr/bin/env python3
-"""Install this one-machine workflow outside macOS's protected Documents folder."""
+"""Self-contained macOS installation; no AutoThu checkout or mandatory Lark CLI."""
 import argparse
 import json
 import os
-import plistlib
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
-RUNTIME = Path.home() / '.local/share/avatarthu'
-LABEL = 'com.local.avatarthu.'
+RUNTIME = Path(os.environ.get('AVATARTHU_HOME', Path.home() / '.local/share/avatarthu')).expanduser().resolve()
 
 
-def dump(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
-    path.chmod(0o600)
+def prepare_config(previous, *, lark=None, claude=None):
+    """Migrate a session once; later upgrades never overwrite refreshed cookies."""
+    cfg = dict(previous)
+    session = RUNTIME / 'session.json'
+    old_session = Path(cfg.get('session') or Path.home() / '.config/autothu/session.json').expanduser()
+    if not session.exists() and old_session != session and old_session.is_file():
+        # Create the copy with private permissions from its first byte.
+        fd = os.open(session, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'wb') as dest:
+            dest.write(old_session.read_bytes())
+        if previous.get('session') and 'autothu' in str(old_session).lower():
+            cfg['migrated_autothu_session'] = str(old_session)
+    if session.exists():
+        session.chmod(0o600)
+    cfg.update(session=str(session), source_repo=str(SOURCE), claude_cli=claude or cfg.get('claude_cli'))
+    cfg['lark_enabled'] = bool(previous.get('lark_enabled', bool(previous.get('lark_user_id')))) if lark is None else lark
+    cfg.setdefault('daily_time', '08:00')
+    cfg.setdefault('stage_timeout', 7200)
+    return cfg
 
 
-def agents(start=True, names=('daily', 'actions', 'messages')):
-    dest = Path.home() / 'Library/LaunchAgents'
-    dest.mkdir(parents=True, exist_ok=True)
-    for name in names:
-        label = LABEL + name
-        subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{label}'], capture_output=True)
-        plist = dest / (label + '.plist')
-        arguments = [str(RUNTIME / '.venv/bin/python'), '-u', '-m', 'loop.' + name]
-        if name == 'daily':
-            arguments.append('--tick')
-        content = {'Label': label, 'ProgramArguments': arguments, 'WorkingDirectory': str(RUNTIME),
-                   'EnvironmentVariables': {'AVATARTHU_HOME': str(RUNTIME), 'PATH': '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:' + str(Path.home() / '.local/bin')},
-                   'StandardOutPath': str(RUNTIME / 'logs' / (name + '.log')),
-                   'StandardErrorPath': str(RUNTIME / 'logs' / (name + '.log')),
-                   'RunAtLoad': True, 'ThrottleInterval': 60}
-        if name == 'daily':
-            content['StartInterval'] = 60
-        else:
-            content['KeepAlive'] = True
-        with plist.open('wb') as f:
-            plistlib.dump(content, f)
-        if start:
-            # bootout can return before launchd has finished releasing the label.
-            for attempt in range(10):
-                result = subprocess.run(['launchctl', 'bootstrap', f'gui/{os.getuid()}', str(plist)], capture_output=True, text=True)
-                if result.returncode == 0:
-                    break
-                if attempt == 9:
-                    raise RuntimeError(f'无法加载 {label}: {result.stderr.strip()}')
-                time.sleep(1)
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--autothu', type=Path, default=SOURCE.parent / 'AutoThu')
-    parser.add_argument('--no-start', action='store_true')
-    parser.add_argument('--agents-only', action='store_true')
-    args = parser.parse_args()
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='安装或更新 AvatarTHU；首次安装默认纯本地运行')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--lark', dest='lark', action='store_const', const=True, default=None, help='启用飞书，自动检测并引导登录')
+    mode.add_argument('--no-lark', dest='lark', action='store_const', const=False, help='仅本地运行')
+    parser.add_argument('--no-start', action='store_true', help='暂不启动或修改后台服务')
+    parser.add_argument('--skip-login', action='store_true', help='安装时跳过交互登录，稍后用 avatarthu login 完成')
+    parser.add_argument('--agents-only', action='store_true', help='按当前设置重新加载已安装的服务')
+    args = parser.parse_args(argv)
+    if sys.version_info < (3, 10):
+        raise SystemExit('需要 Python 3.10 或更新版本。')
+    python = RUNTIME / '.venv/bin/python'
     if args.agents_only:
-        agents()
+        if not args.no_start:
+            subprocess.run([str(python), '-m', 'loop.services'], cwd=RUNTIME, check=True)
         return
-    home = args.autothu.expanduser().resolve()
-    canonical = Path.home() / '.config/autothu/session.json'
-    source_python = home / '.venv/bin/python'
-    if not source_python.exists():
-        source_python = Path(sys.executable)
-    lark, claude = shutil.which('lark-cli'), shutil.which('claude')
-    if not lark or not claude:
-        raise SystemExit('请先配置 lark-cli 和 Claude Code CLI')
-    who = json.loads(subprocess.check_output([lark, 'whoami', '--as', 'user', '--json'], text=True))
-    user_id = who['onBehalfOf']['openId']
-    for key in ('card.action.trigger', 'im.message.receive_v1'):
-        r = json.loads(subprocess.check_output([lark, 'event', 'consume', key, '--as', 'bot', '--dry-run'], text=True))
-        if r.get('ok') is not True:
-            raise SystemExit(f'飞书事件 {key} 未就绪')
+    previous = json.loads((RUNTIME / 'config.json').read_text()) if (RUNTIME / 'config.json').exists() else {}
+    claude = shutil.which('claude') or previous.get('claude_cli')
+    if not claude or not Path(claude).is_file():
+        raise SystemExit('请先安装并登录 Claude Code CLI。飞书推送可选。')
     RUNTIME.mkdir(parents=True, exist_ok=True)
     RUNTIME.chmod(0o700)
-    for path in ('logs', 'data', 'outbox'):
-        (RUNTIME / path).mkdir(parents=True, exist_ok=True)
-    python = RUNTIME / '.venv/bin/python'
+    for name in ('logs', 'data', 'outbox', 'bin'):
+        (RUNTIME / name).mkdir(parents=True, exist_ok=True)
     if not python.exists():
-        base = subprocess.check_output([str(source_python), '-c', 'import sys; print(sys._base_executable)'], text=True).strip()
-        subprocess.run([base, '-m', 'venv', str(RUNTIME / '.venv')], check=True)
-    req = (SOURCE / 'requirements.txt').read_bytes()
+        subprocess.run([sys._base_executable, '-m', 'venv', str(RUNTIME / '.venv')], check=True)
+    requirements = (SOURCE / 'requirements.txt').read_bytes()
     receipt = RUNTIME / 'requirements-installed.txt'
-    if not receipt.exists() or receipt.read_bytes() != req:
+    if not receipt.exists() or receipt.read_bytes() != requirements:
         subprocess.run([str(python), '-m', 'pip', 'install', '-r', str(SOURCE / 'requirements.txt')], check=True)
-        receipt.write_bytes(req)
+        receipt.write_bytes(requirements)
     shutil.copytree(SOURCE / 'loop', RUNTIME / 'loop', dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
-    shutil.copytree(SOURCE / 'vendor/autothu', RUNTIME / 'autothu', dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
-    canonical.parent.mkdir(parents=True, exist_ok=True)
-    if not canonical.exists():
-        old_session = home / 'local/session.json'
-        if old_session.exists():
-            shutil.copy2(old_session, canonical)
-        else:
-            subprocess.run([str(python), str(RUNTIME / 'autothu/scripts/thu_learn_cli.py'), '--session', str(canonical), 'login'], check=True)
-    canonical.chmod(0o600)
-    old = json.loads((RUNTIME / 'config.json').read_text()) if (RUNTIME / 'config.json').exists() else {}
-    old.update(lark_cli=lark, claude_cli=claude, lark_user_id=user_id,
-               session=str(canonical), source_repo=str(SOURCE))
-    old.setdefault('daily_time', '08:00')
-    old.setdefault('stage_timeout', 7200)
-    dump(RUNTIME / 'config.json', old)
-    if not (SOURCE / 'courses').exists():
-        (RUNTIME / 'data/courses').mkdir(parents=True, exist_ok=True)
-        (SOURCE / 'courses').symlink_to(RUNTIME / 'data/courses', target_is_directory=True)
-    # Do not run two generations of this same personal workflow simultaneously.
+    shutil.copytree(SOURCE / 'third_party', RUNTIME / 'third_party', dirs_exist_ok=True)
+    shutil.copy2(SOURCE / 'THIRD_PARTY.md', RUNTIME / 'THIRD_PARTY.md')
+    shutil.copy2(SOURCE / 'avatarthu', RUNTIME / 'bin/avatarthu')
+    (RUNTIME / 'bin/avatarthu').chmod(0o755)
+    # --lark enables only after auth succeeds; preserve the previous working mode on failure.
+    cfg = prepare_config(previous, lark=False if args.lark is False else None, claude=claude)
+    sys.path.insert(0, str(RUNTIME))
+    os.environ['AVATARTHU_HOME'] = str(RUNTIME)
+    from loop import common as c
+    with c.lock('settings'):
+        c.write_json(c.CONFIG, cfg)
+    courses = SOURCE / 'courses'
+    (RUNTIME / 'data/courses').mkdir(parents=True, exist_ok=True)
+    if not courses.exists() and not courses.is_symlink():
+        courses.symlink_to(RUNTIME / 'data/courses', target_is_directory=True)
+    subprocess.run([str(python), '-c', 'from loop.auth import ensure_thu; ensure_thu(skip_login=' + str(args.skip_login) + ')'], cwd=RUNTIME, check=True)
+    lark_error = False
+    if args.lark is True or (c.lark_enabled() and not args.skip_login):
+        # Explicit --lark still authorizes login even when school login is skipped.
+        result = subprocess.run([str(python), '-m', 'loop.cli', 'login', 'lark', '--no-start'], cwd=RUNTIME)
+        lark_error = result.returncode != 0
     if not args.no_start:
-        for name in ('daily', 'actions', 'messages'):
-            label = 'com.local.thu-learn-loop.' + name
-            old_plist = Path.home() / 'Library/LaunchAgents' / (label + '.plist')
-            subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{label}'], capture_output=True)
-            if old_plist.exists():
-                backup = RUNTIME / 'legacy-launchagents'
-                backup.mkdir(exist_ok=True)
-                shutil.move(str(old_plist), backup / old_plist.name)
-        subprocess.run([str(python), str(RUNTIME / 'autothu/scripts/thu_learn_cli.py'), '--session', str(canonical),
-                        'keepalive', '--install', '--recover-chrome'], check=True)
-        agents()
+        subprocess.run([str(python), '-m', 'loop.services'], cwd=RUNTIME, check=True)
+    try:
+        revision = subprocess.check_output(['git', '-C', str(SOURCE), 'rev-parse', 'HEAD'], text=True).strip()
+        c.write_json(c.DATA / 'deployed-revision.json', {'revision': revision, 'deployed_at': c.now().isoformat()})
+    except (OSError, subprocess.CalledProcessError):
+        pass
     print('安装完成:', RUNTIME)
-    print('立即运行：./run-now.sh；查看状态：./status.sh；更新登录：./login.sh')
+    print('飞书推送:', '已启用' if c.lark_enabled() else '未启用（本地审阅）')
+    print('查看状态：./avatarthu status；更新登录：./avatarthu login；启用飞书：./avatarthu login lark')
+    if lark_error:
+        print('核心流程已安装，飞书配置未完成；排查后运行 ./avatarthu login lark。', file=sys.stderr)
+        raise SystemExit(2)
+
 
 if __name__ == '__main__':
     main()

@@ -24,6 +24,11 @@ def now():
 def config():
     return read_json(CONFIG)
 
+def lark_enabled(cfg=None):
+    cfg = config() if cfg is None else cfg
+    # Preserve installations from before notifications became optional.
+    return bool(cfg.get('lark_enabled', bool(cfg.get('lark_user_id'))))
+
 def read_json(path, default=None):
     if not Path(path).exists():
         return {} if default is None else default
@@ -93,6 +98,8 @@ def inside(base, relative):
     return path
 
 def lark(*args, timeout=180):
+    if not lark_enabled():
+        raise RuntimeError('飞书推送未启用；运行 ./avatarthu login lark 可启用。')
     command = [config()['lark_cli'], *args]
     r = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=timeout)
     try:
@@ -127,6 +134,11 @@ def notify_once(key, text):
     with lock('notifications'):
         sent = read_json(path)
         if key in sent:
+            return
+        if not lark_enabled():
+            sent[key] = {'text': text, 'recorded_at': now().isoformat(), 'channel': 'local'}
+            write_json(path, sent)
+            print(text, flush=True)
             return
         from .cards import receipt
         title, _, detail = text.partition('\n')
