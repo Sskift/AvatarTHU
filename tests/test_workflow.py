@@ -21,6 +21,9 @@ class WorkflowTests(unittest.TestCase):
         publisher.start()
         self.addCleanup(publisher.stop)
         self.workflow = importlib.reload(workflow)
+        reviewer = patch.object(self.workflow.cross_review, 'review', return_value={'approved': True})
+        reviewer.start()
+        self.addCleanup(reviewer.stop)
         self.actions = importlib.reload(actions)
         self.messages = importlib.reload(messages)
         self.daily = importlib.reload(daily)
@@ -150,9 +153,9 @@ class WorkflowTests(unittest.TestCase):
         (job / 'draft/answer.md').write_text('stale output')
         self.c.write_json(job / 'result.json', {'ready': True, 'summary': 'stale', 'blockers': [], 'files': ['draft/answer.md']})
         fake = Mock(returncode=1, pid=123)
-        with patch('loop.workflow.subprocess.Popen', return_value=fake):
+        with patch('loop.engines.subprocess.Popen', return_value=fake):
             with self.assertRaises(RuntimeError):
-                self.workflow.run_stage(job, 'solver', 'prompt')
+                self.workflow.run_stage(job, 'claude', 'prompt')
         self.assertFalse((job / 'complete.json').exists())
 
     def test_artifact_path_and_symlink_escape_rejected(self):
@@ -195,7 +198,7 @@ class WorkflowTests(unittest.TestCase):
             upload.assert_not_called()
             self.assertIn('receipt_message', saved)
 
-    def test_prepare_uses_one_claude_and_never_submits(self):
+    def test_single_writer_stage_never_submits(self):
         folder = self.root / 'input-files'
         folder.mkdir()
         (folder / 'question.txt').write_text('Compute 1 + 1')
@@ -209,7 +212,7 @@ class WorkflowTests(unittest.TestCase):
             (job / target).mkdir()
             (job / target / 'answer.txt').write_text('2')
             if name == 'claude':
-                (job / 'review.md').write_text('Independently checked: 1+1=2')
+                (job / 'review.md').write_text('Writer self-check: 1+1=2')
             return {'ready': True, 'summary': 'Checked', 'blockers': [], 'files': [target + '/answer.txt']}
         with patch.object(self.workflow, 'run_stage', side_effect=stage), patch.object(self.delivery, 'send', return_value={'message_id': 'sent'}), patch.object(self.learn, 'upload') as upload:
             self.workflow.process(st)
@@ -254,7 +257,7 @@ class WorkflowTests(unittest.TestCase):
         result = {'ready': True, 'summary': 'done', 'blockers': [], 'files': ['final/answer.txt']}
         self.c.write_json(job / 'result.json', result)
         self.c.write_json(job / 'complete.json', {'hashes': {p: self.c.digest(job / p) for p in ['final/answer.txt', 'review.md']}})
-        with patch('loop.workflow.subprocess.Popen') as popen:
+        with patch('loop.engines.subprocess.Popen') as popen:
             self.assertEqual(self.workflow.run_stage(job, 'claude', 'ignored'), result)
             popen.assert_not_called()
             (job / 'final/answer.txt').write_text('changed')

@@ -1,4 +1,4 @@
-"""One daily sync at 08:00 Asia/Shanghai, with queued revisions between runs."""
+"""Course polling (12 hours by default) and prompt processing of local revisions."""
 import argparse
 import sys
 import traceback
@@ -8,6 +8,7 @@ from .common import DATA, config, fingerprint, lark_enabled, lock, now, notify_o
 from . import learn
 from .delivery import refresh_card_links, send_notices
 from .workflow import materials_hash, process
+from .settings import next_scan
 
 
 def sync():
@@ -32,7 +33,7 @@ def sync():
                 st.update(meta, source_hash=source_hash, source_cached=False)
             save_task(st)
     for old in tasks():
-        if old['task_id'] not in active and old.get('status') in {'queued', 'awaiting', 'needs_student', 'revision_ready', 'working', 'failed', 'approval_invalid', 'delivery_pending'}:
+        if old['task_id'] not in active and old.get('status') in {'queued', 'awaiting', 'needs_student', 'revision_ready', 'working', 'reviewing', 'rewriting', 'failed', 'approval_invalid', 'delivery_pending'}:
             with lock(old['task_id']):
                 st = read_json(task_path(old['task_id']))
                 st['status'] = 'closed_remote'
@@ -47,15 +48,17 @@ def run(*, tick=False, sync_only=False, selected=None):
     try:
         with lock('daily', blocking=False):
             schedule = read_json(DATA / 'schedule.json')
-            today = now().date().isoformat()
-            retry_at = schedule.get('next_sync_retry_at')
-            due = ((now().hour, now().minute) >= tuple(map(int, config().get('daily_time', '08:00').split(':'))) and (schedule.get('last_sync_date') != today or bool(retry_at))
-                   and (not retry_at or now() >= datetime.fromisoformat(retry_at)))
+            due = now() >= next_scan(schedule, config(), now())
+            sync_failed = False
             if not tick or due:
-                sync()
-                write_json(DATA / 'schedule.json', {'last_sync_date': today, 'last_sync_at': now().isoformat()})
+                try:
+                    sync()
+                    write_json(DATA / 'schedule.json', {'last_sync_at': now().isoformat()})
+                except Exception as exc:
+                    sync_failed = True
+                    record_sync_error(exc)
             if sync_only:
-                return
+                return not sync_failed
             for old in tasks():
                 if selected and old['task_id'] != selected:
                     continue
@@ -72,7 +75,7 @@ def run(*, tick=False, sync_only=False, selected=None):
                     with lock(old['task_id']):
                         send_submission_receipt(read_json(task_path(old['task_id'])))
                     continue
-                if old.get('status') not in {'queued', 'revision_ready', 'working', 'delivery_pending', 'failed'}:
+                if old.get('status') not in {'queued', 'revision_ready', 'working', 'reviewing', 'rewriting', 'delivery_pending', 'failed'}:
                     continue
                 if old.get('status') == 'failed' and tick and old.get('retry_at') and now() < datetime.fromisoformat(old['retry_at']):
                     continue
@@ -90,8 +93,21 @@ def run(*, tick=False, sync_only=False, selected=None):
                         notify_once('task-error:' + st['task_id'] + ':' + str(st.get('revision', 1)) + ':' + fingerprint(str(exc)),
                                     f'本地作业处理需要检查：{st["title"]}\n{safe_error(exc)[:1000]}\n修复后运行 ./run-now.sh 会从上次成功阶段继续。')
             write_json(DATA / 'run-result.json', {'completed_at': now().isoformat(), 'tasks': len(tasks())})
+            return not sync_failed
     except BlockingIOError:
         print('A run is already active; no duplicate run started.', flush=True)
+
+
+def record_sync_error(exc):
+    print(safe_error(traceback.format_exc()), file=sys.stderr)
+    schedule = read_json(DATA / 'schedule.json')
+    schedule['next_sync_retry_at'] = (now() + timedelta(minutes=15)).isoformat()
+    write_json(DATA / 'schedule.json', schedule)
+    try:
+        notify_once('sync-error:' + now().date().isoformat() + ':' + fingerprint(str(exc)),
+                    '网络学堂同步失败：' + safe_error(exc)[:1200] + '\n如登录过期，请运行 ./avatarthu login thu。已缓存的作业仍会继续处理。')
+    except Exception:
+        print(safe_error(traceback.format_exc()), file=sys.stderr)
 
 
 def main(argv=None):
@@ -101,17 +117,11 @@ def main(argv=None):
     p.add_argument('--task')
     args = p.parse_args(argv)
     try:
-        run(tick=args.tick, sync_only=args.sync_only, selected=args.task)
+        success = run(tick=args.tick, sync_only=args.sync_only, selected=args.task)
     except Exception as exc:
-        print(safe_error(traceback.format_exc()), file=sys.stderr)
-        schedule = read_json(DATA / 'schedule.json')
-        schedule['next_sync_retry_at'] = (now() + timedelta(minutes=15)).isoformat()
-        write_json(DATA / 'schedule.json', schedule)
-        try:
-            notify_once('sync-error:' + now().date().isoformat() + ':' + fingerprint(str(exc)),
-                        '网络学堂同步失败：' + safe_error(exc)[:1200] + '\n如登录过期，请运行 ./login.sh 更新登录态。')
-        except Exception:
-            print(safe_error(traceback.format_exc()), file=sys.stderr)
+        record_sync_error(exc)
+        raise SystemExit(1)
+    if success is False:
         raise SystemExit(1)
 
 if __name__ == '__main__':

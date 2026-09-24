@@ -54,7 +54,7 @@ class IntegrationTests(unittest.TestCase):
             (job / 'final/answer.txt').write_text('2')
             (job / 'review.md').write_text('Checked 1+1=2')
             return {'ready': True, 'summary': 'Done', 'blockers': [], 'files': ['final/answer.txt']}
-        with patch.object(self.workflow, 'run_stage', side_effect=solve) as stage, patch.object(self.delivery, 'publish') as cloud, patch.object(self.delivery, 'send') as send, patch.object(self.learn, 'upload') as upload:
+        with patch.object(self.workflow.cross_review, 'review', return_value={'approved': True}), patch.object(self.workflow, 'run_stage', side_effect=solve) as stage, patch.object(self.delivery, 'publish') as cloud, patch.object(self.delivery, 'send') as send, patch.object(self.learn, 'upload') as upload:
             self.workflow.process(st)
             stage.assert_called_once()
             cloud.assert_not_called()
@@ -93,7 +93,12 @@ class IntegrationTests(unittest.TestCase):
         with patch.object(self.delivery, 'send') as send:
             self.assertEqual(self.delivery.send_notices([{'unread': True, 'course_id': 'cid', 'id': 'n'}], mark), 0)
             send.assert_not_called()
-        mark.assert_not_called()
+            mark.assert_not_called()
+
+    def test_service_start_preserves_already_loaded_jobs(self):
+        with patch.object(self.services.sys, 'platform', 'darwin'), patch.object(self.services.Path, 'home', return_value=self.root), patch.object(self.services.subprocess, 'run', return_value=Mock(returncode=0)) as run:
+            self.services.reconcile(names=('daily', 'keepalive'), restart=False)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['print', 'print'])
 
     def test_disabled_callbacks_and_local_errors_need_no_lark_keys(self):
         with patch.object(self.learn, 'upload') as upload, patch.object(self.c, 'send') as send:
@@ -185,8 +190,7 @@ class IntegrationTests(unittest.TestCase):
         with patch.object(install, 'SOURCE', source), patch.object(install.shutil, 'which', return_value=str(claude)) as which, patch.object(install.subprocess, 'run') as run, patch.object(install.subprocess, 'check_output', return_value='revision'):
             for mode in ('--no-lark', '--lark'):
                 install.main([mode, '--no-start', '--skip-login'])
-        self.assertEqual(which.call_count, 2)
-        self.assertTrue(all(call.args == ('claude',) for call in which.call_args_list))
+        self.assertTrue(all(call.args[0] in {'claude', 'codex'} for call in which.call_args_list))
         self.assertEqual(run.call_count, 2)
         self.assertIn('ensure_thu(skip_login=True)', run.call_args.args[0][-1])
         self.assertFalse(self.c.lark_enabled())

@@ -47,12 +47,14 @@ def frame(title, subtitle, color, elements, tag=None):
 def assignment(st):
     ready = st['ready']
     review = st.get('review_doc', {})
-    status = '产物待审阅' if ready else '部分产物 · 需要补充'
+    status = ('独立复审通过 · 待你确认' if st.get('review_outcome') == 'approved' else '产物待审阅') if ready else '需要修改或补充'
     color = 'indigo' if ready else 'orange'
     info = columns([f'**{status}**\n作业描述、关键结果和所有产物集中在云文档。',
                     f'截止时间（北京）\n**{escape(st["deadline"])}**\n第 {st["revision"]} 版'],
                    'blue-50' if ready else 'orange-50')
     detail = '在云文档中查看题目、预览报告、下载全部产物。\n\n文档中的批注和编辑不会直接更改提交文件。'
+    if st.get('review_history'):
+        detail += '\n\n历次独立复审的结论、意见和检查记录都在云文档第五部分。'
     if st.get('source_cached'):
         detail += '\n\n基于已下载资料；当前登录待恢复，尚未重新同步。'
     if st.get('blockers'):

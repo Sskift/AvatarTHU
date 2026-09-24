@@ -28,7 +28,12 @@ def prepare_config(previous, *, lark=None, claude=None):
         session.chmod(0o600)
     cfg.update(session=str(session), source_repo=str(SOURCE), claude_cli=claude or cfg.get('claude_cli'))
     cfg['lark_enabled'] = bool(previous.get('lark_enabled', bool(previous.get('lark_user_id')))) if lark is None else lark
-    cfg.setdefault('daily_time', '08:00')
+    cfg.setdefault('poll_interval_seconds', 12 * 3600)
+    cfg.setdefault('review_mode', 'claude-codex')
+    cfg.setdefault('max_review_rounds', 3)
+    cfg.pop('daily_time', None)
+    if shutil.which('codex'):
+        cfg['codex_cli'] = shutil.which('codex')
     cfg.setdefault('stage_timeout', 7200)
     return cfg
 
@@ -97,6 +102,9 @@ def main(argv=None):
     print('安装完成:', RUNTIME)
     print('飞书推送:', '已启用' if c.lark_enabled() else '未启用（本地审阅）')
     print('查看状态：./avatarthu status；更新登录：./avatarthu login；启用飞书：./avatarthu login lark')
+    print('写作/复审与轮询设置：./avatarthu configure；启动后台：./avatarthu service start')
+    if not c.config().get('codex_cli'):
+        print('交叉复审还需要 Codex CLI，请安装并运行 codex login 后开始处理作业。')
     if lark_error:
         print('核心流程已安装，飞书配置未完成；排查后运行 ./avatarthu login lark。', file=sys.stderr)
         raise SystemExit(2)

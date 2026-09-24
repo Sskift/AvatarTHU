@@ -208,6 +208,24 @@ def build(st, draft, *, local=False):
                '<li><b>提出修改。</b>在本文相关段落或图片添加批注，回到本版卡片点击“按文档批注修改”；也可直接在卡片填写意见。</li>'
                '<li><b>确认提交。</b>审阅完成后，由本人在本版卡片选择提交。</li></ol>')
     blocks += ['<h1>四、审阅与操作</h1>', instructions, paragraph('直接编辑审阅文档不会改变待提交文件。')]
+    history = st.get('review_history', [])
+    if history:
+        blocks += ['<h1>五、历次独立复审</h1>', paragraph(
+            '每轮复审使用另一个工具的全新会话，只提供原题和该轮产物，不提供主写对话、自查或之前的复审结论。'
+            '两边使用各自 CLI 的默认模型。本节按时间保留全部意见；复审通过仍需本人确认提交。')]
+        for entry in history:
+            verdict = '通过' if entry['approved'] else '不通过，需要修改'
+            blocks += ['<h2>' + esc(f'第 {entry["revision"]} 版 · 第 {entry["round"]} 轮 · {verdict}') + '</h2>',
+                       paragraph(f'主写：{entry["writer"]} / 复审：{entry["reviewer"]} / 时间：{entry["reviewed_at"]}'),
+                       prose(entry['summary'])]
+            if entry['comments']:
+                blocks += ['<ol>' + ''.join('<li><b>' + esc(point['location']) + '</b><br/>'
+                           + esc(point['comment']).replace('\n', '<br/>') + '<br/>修改建议：'
+                           + esc(point['suggestion']).replace('\n', '<br/>') + '</li>' for point in entry['comments']) + '</ol>']
+            if entry['checks']:
+                blocks += [paragraph('复审实际检查：'), '<ul>' + ''.join('<li>' + esc(x) + '</li>' for x in entry['checks']) + '</ul>']
+            if entry['limitations']:
+                blocks += [paragraph('仍无法确认或需要本人核对：'), '<ul>' + ''.join('<li>' + esc(x) + '</li>' for x in entry['limitations']) + '</ul>']
     marker = f'版本标识：{st["task_id"]} / r{st["revision"]} / {st.get("sha256") or "无提交包"}'
     blocks += [paragraph(marker)]
     draft.write_text('\n'.join(blocks), encoding='utf-8')

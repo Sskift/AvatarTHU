@@ -21,6 +21,12 @@ def main():
     revise = sub.add_parser('revise', help='为本地审阅中的作业提供修改意见')
     revise.add_argument('task_id')
     revise.add_argument('--feedback', required=True)
+    settings = sub.add_parser('configure', help='设置主写/复审分工、轮询间隔和自动复审轮数')
+    settings.add_argument('--mode', choices=('claude-codex', 'codex-claude'))
+    settings.add_argument('--poll-interval', help='例如 30m、12h、1d；不带单位按小时')
+    settings.add_argument('--max-review-rounds', type=int, help='每版自动复审轮数；0 为不限')
+    service = sub.add_parser('service', help='启动、停止或查看后台 loop')
+    service.add_argument('action', choices=('start', 'stop', 'status'))
     sub.add_parser('uninstall', help='停用所有服务，保留课程和产物')
     args = parser.parse_args()
     try:
@@ -38,6 +44,20 @@ def main():
         elif args.command == 'status':
             from .status import main as status
             status()
+        elif args.command == 'configure':
+            from .settings import configure
+            configure(args)
+        elif args.command == 'service':
+            from . import services
+            if args.action == 'start':
+                services.retire_legacy()
+                services.reconcile(restart=False)
+                print('后台 loop 已启动；退出终端后继续运行，登录系统及休眠唤醒后按计划补查。')
+            elif args.action == 'stop':
+                services.uninstall()
+            else:
+                from .status import main as status
+                status()
         elif args.command == 'revise':
             from .local_review import revise
             revise(args.task_id, args.feedback)

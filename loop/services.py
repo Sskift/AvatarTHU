@@ -39,13 +39,17 @@ def bootout(label):
     subprocess.run(['launchctl', 'bootout', f'gui/{os.getuid()}/{label}'], capture_output=True)
 
 
-def reconcile(*, names=NAMES):
+def reconcile(*, names=NAMES, restart=True):
     if sys.platform != 'darwin':
         raise RuntimeError('后台服务安装目前支持 macOS。')
     dest = Path.home() / 'Library/LaunchAgents'
     dest.mkdir(parents=True, exist_ok=True)
     active = enabled_names()
     for name in names:
+        if not restart and name in active:
+            loaded = subprocess.run(['launchctl', 'print', f'gui/{os.getuid()}/{LABEL + name}'], capture_output=True)
+            if loaded.returncode == 0:
+                continue
         bootout(LABEL + name)
         plist = dest / (LABEL + name + '.plist')
         if name not in active:

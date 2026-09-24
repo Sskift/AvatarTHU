@@ -8,7 +8,9 @@ from .common import DATA, ROOT, config, lark_enabled, read_json, tasks
 def main():
     print('运行目录:', ROOT)
     print('飞书推送:', '已启用' if lark_enabled() else '未启用；产物在本地审阅，可用 avatarthu login lark 开启')
-    print('每日运行:', config().get('daily_time', '08:00'), 'Asia/Shanghai；休眠后唤醒补跑')
+    from .settings import show
+    show()
+    print('后台调度每分钟轻量检查一次；课程到期才扫描，休眠唤醒后补查；模型只在有作业时启动。')
     from pathlib import Path
     keepalive = read_json(Path(config().get('session', ROOT / 'session.json')).with_name('keepalive-status.json'))
     print('登录保活:', keepalive.get('state', '未安装'), keepalive.get('message', ''))
@@ -21,6 +23,8 @@ def main():
     print('最近同步:', json.dumps(read_json(DATA / 'sync-result.json'), ensure_ascii=False))
     for st in tasks():
         print(f'{st["task_id"]}  {st["title"]}  r{st.get("revision", 1)}  {st["status"]}')
+        if st.get('review_round'):
+            print('  交叉复审轮次:', st['review_round'], '；结论:', st.get('review_outcome', '待复审'))
         if st.get('error'):
             print('  ' + st['error'])
         if st.get('local_review'):
