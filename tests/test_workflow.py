@@ -250,6 +250,20 @@ class WorkflowTests(unittest.TestCase):
     def test_error_redacts_csrf(self):
         self.assertNotIn('private-value', self.c.safe_error('failed https://learn.tsinghua.edu.cn/x?_csrf=private-value&x=y'))
 
+    def test_card_links_retry_never_resends_or_changes_approval(self):
+        st = dict(self.st, deliveries={'artifact-0': {'message_id': 'om_file'}, 'review': {'message_id': 'om_review'}, 'card': {'message_id': 'om_card'}})
+        responses = [{'messages': [{'message_id': 'om_file', 'message_app_link': 'https://applink.feishu.cn/file'}]},
+                     {'messages': [{'message_id': 'om_review', 'message_app_link': 'https://applink.feishu.cn/review'}]}, {}]
+        with patch.object(self.delivery, 'lark', side_effect=responses) as lark, patch.object(self.delivery, 'send') as send:
+            self.delivery.refresh_card_links(st)
+            self.delivery.refresh_card_links(st)
+            send.assert_not_called()
+        self.assertEqual(lark.call_count, 3)
+        self.assertTrue(st['links_synced'])
+        self.assertEqual(st['nonce'], 'secret-version')
+        self.assertEqual(st['status'], 'awaiting')
+        self.assertIn('https://applink.feishu.cn/file', lark.call_args.args[-1])
+
     def test_lark_uses_structured_stderr_errors(self):
         fake = Mock(returncode=1, stdout='', stderr=json.dumps({'ok': False, 'error': {'message': 'missing permission'}}))
         with patch('loop.common.subprocess.run', return_value=fake):

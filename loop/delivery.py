@@ -3,6 +3,7 @@ import json
 import secrets
 import shutil
 import zipfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from .common import DATA, OUT, digest, fingerprint, inside, lark, lock, now, read_json, save_task, send, write_json
 
@@ -44,7 +45,7 @@ def snapshot(st, result, job):
               artifacts=artifacts, report=str(target / 'review.md'),
               submission=str(submit_file) if submit_file else None,
               sha256=digest(submit_file) if submit_file else None, nonce=secrets.token_hex(16),
-              deliveries={}, status='delivery_pending')
+              deliveries={}, links_synced=False, links_retry_at=None, status='delivery_pending')
     save_task(st)
 
 
@@ -70,6 +71,30 @@ def deliver(st):
         st['card_message_id'] = response['message_id']
         st['chat_id'] = response.get('chat_id')
     st['status'] = 'awaiting' if st['ready'] else 'needs_student'
+    save_task(st)
+
+
+def refresh_card_links(st):
+    """Retry missing file links without resending artifacts or renewing approval."""
+    if st.get('status') not in {'awaiting', 'needs_student'} or st.get('links_synced'):
+        return
+    if st.get('links_retry_at') and now() < datetime.fromisoformat(st['links_retry_at']):
+        return
+    st['links_retry_at'] = (now() + timedelta(minutes=15)).isoformat()
+    save_task(st)
+    for label, response in st.get('deliveries', {}).items():
+        if label == 'card' or response.get('message_app_link'):
+            continue
+        messages = lark('im', '+messages-mget', '--as', 'bot', '--message-ids', response['message_id'], '--no-reactions')['messages']
+        match = next(m for m in messages if m['message_id'] == response['message_id'])
+        url = match.get('message_app_link')
+        if not url:
+            raise RuntimeError('飞书暂未返回附件消息链接；稍后重试。')
+        response['message_app_link'] = url
+        save_task(st)
+    lark('im', 'messages', 'patch', '--as', 'bot', '--message-id', st['card_message_id'],
+         '--data', json.dumps({'content': json.dumps(card(st), ensure_ascii=False)}, ensure_ascii=False))
+    st['links_synced'] = True
     save_task(st)
 
 

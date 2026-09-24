@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from .common import DATA, config, fingerprint, lock, now, notify_once, read_json, safe_error, save_task, task_path, tasks, write_json
 from . import learn
-from .delivery import send_notices
+from .delivery import refresh_card_links, send_notices
 from .workflow import materials_hash, process
 
 
@@ -58,6 +58,13 @@ def run(*, tick=False, sync_only=False, selected=None):
                 return
             for old in tasks():
                 if selected and old['task_id'] != selected:
+                    continue
+                if old.get('status') in {'awaiting', 'needs_student'} and not old.get('links_synced'):
+                    with lock(old['task_id']):
+                        try:
+                            refresh_card_links(read_json(task_path(old['task_id'])))
+                        except Exception as exc:
+                            print('附件链接稍后重试: ' + safe_error(exc), file=sys.stderr)
                     continue
                 if old.get('status') == 'submitted' and not old.get('receipt_message'):
                     from .actions import send_submission_receipt
