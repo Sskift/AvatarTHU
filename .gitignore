@@ -16,3 +16,7 @@ courses
 *.log
 .coverage
 .pytest_cache/
+build/
+dist/
+*.exe
+*.test

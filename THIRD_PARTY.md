@@ -1,10 +1,19 @@
 # Third-party sources
 
-- `loop/thulearn/client.py`, `login.py`, and `keepalive.py` contain code adapted from [AutoThu](https://github.com/shiyt23/AutoThu), MIT, including our macOS one-click login and periodic keepalive contributions from [Sskift/AutoThu](https://github.com/Sskift/AutoThu/tree/feat/macos-one-click-login). Source snapshot: `b5caba55ba2a53fcd1e08db1a5fab0d01231a39f`. The original copyright and license are retained in [third_party/AutoThu-LICENSE](third_party/AutoThu-LICENSE) and copied into installed distributions.
-- AvatarTHU is developed as an independent project. The adapted files use package-relative imports, AvatarTHU-owned session storage, and AvatarTHU's installer and LaunchAgents. The upstream CLI, checkout, standalone keepalive environment, Windows helpers and `thulearn2018` package are not required or bundled. No external AutoThu executable is invoked.
-- Feishu support optionally invokes the official [Lark CLI](https://github.com/larksuite/cli). No Lark CLI source or binary is bundled in this repository; an existing installation is reused, or `@larksuite/cli@1.0.96` is installed through npm in the runtime directory when the owner enables Feishu.
-- Initial workflow, approval validation and Card 2.0 layout adapted from the owner's local `thu-learn-loop` prototype. AvatarTHU now supports Claude/Codex writer and independent reviewer pairings.
-- Network API field/endpoint references cross-checked against https://github.com/Harry-Chen/thu-learn-lib and the current Web Learning responses. No TypeScript implementation is bundled.
-- Card 2.0 structure follows the installed Lark CLI component documentation. Historical layout inspiration: https://github.com/TWe1v3/Feishu-card-strong . No third-party card skill code is executed or bundled.
+AvatarTHU is an independent Go implementation. It does not invoke or bundle a Python interpreter, an AutoThu checkout, Selenium, ChromeDriver, or the `thulearn2018` package.
 
-Course materials, student data, login sessions, credentials and generated assignments are never part of the source repository.
+- `internal/app/school.go` and `internal/app/login.go` adapt network endpoints, cookie handling and macOS Chrome session import from [AutoThu](https://github.com/shiyt23/AutoThu), MIT, including our one-click login and keepalive contributions in [Sskift/AutoThu](https://github.com/Sskift/AutoThu/tree/feat/macos-one-click-login). Reference snapshot: `b5caba55ba2a53fcd1e08db1a5fab0d01231a39f`. The original copyright and license remain in [third_party/AutoThu-LICENSE](third_party/AutoThu-LICENSE) and distributed archives.
+- Go's standard library and runtime are linked into the executable under Go's BSD-style license. End users do not install Go.
+- [gofrs/flock](https://github.com/gofrs/flock): portable process locks, BSD-3-Clause.
+- [gorilla/websocket](https://github.com/gorilla/websocket): the local browser DevTools connection, BSD-2-Clause.
+- [ledongthuc/pdf](https://github.com/ledongthuc/pdf): PDF text extraction, BSD-3-Clause; based on rsc/pdf.
+- [yuin/goldmark](https://github.com/yuin/goldmark): Markdown parsing, MIT.
+- `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/image`: HTML, cookie domain validation, Windows process support, and image decoding, BSD-3-Clause.
+- Feishu optionally invokes the official [Lark CLI](https://github.com/larksuite/cli). Its binary/source is not bundled. An existing installation is reused, or `@larksuite/cli@1.0.96` is installed through npm into the user's data directory when Feishu is enabled.
+- Claude Code and Codex CLI remain separately installed tools with their own licenses, accounts and model settings. They are not bundled.
+- Network API fields were also cross-checked against [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib). No TypeScript implementation is bundled.
+- Card 2.0 follows the official Lark CLI documentation. Historical layout inspiration: [Feishu-card-strong](https://github.com/TWe1v3/Feishu-card-strong); no third-party card skill is executed or bundled.
+
+Pinned Go module versions are recorded in `go.mod` and `go.sum`. Release archives include the upstream dependency license files under `licenses/`.
+
+Course materials, student data, sessions, credentials, and generated assignments are never part of the source repository or releases.

@@ -1,13 +1,42 @@
-name: tests
+name: native checks
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  workflow:
-    runs-on: ubuntu-latest
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: '3.12'
-          cache: pip
-      - run: python -m pip install -r requirements.txt
-      - run: python -m unittest discover -s tests -v
+          go-version: '1.27.1'
+          cache: true
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: Build native executable
+        env:
+          CGO_ENABLED: '0'
+        run: go build -trimpath -o build/ ./cmd/avatarthu
+      - name: Clean installation without a runtime (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          export AVATARTHU_HOME="$RUNNER_TEMP/avatar-clean"
+          build/avatarthu init --no-login --no-start
+          "$AVATARTHU_HOME/bin/avatarthu" --version
+          "$AVATARTHU_HOME/bin/avatarthu" configure --poll-interval 12h --mode codex-claude
+          test ! -d "$AVATARTHU_HOME/.venv"
+      - name: Clean installation without a runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:AVATARTHU_HOME = Join-Path $env:RUNNER_TEMP 'avatar-clean'
+          & ./build/avatarthu.exe init --no-login --no-start
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:AVATARTHU_HOME/bin/avatarthu.exe" --version
+          & "$env:AVATARTHU_HOME/bin/avatarthu.exe" configure --poll-interval 12h --mode codex-claude
+          if (Test-Path "$env:AVATARTHU_HOME/.venv") { throw 'Unexpected runtime environment' }

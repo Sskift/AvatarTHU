@@ -1,0 +1,52 @@
+name: native releases
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: darwin, arch: arm64}
+          - {os: darwin, arch: amd64}
+          - {os: windows, arch: amd64}
+          - {os: windows, arch: arm64}
+          - {os: linux, arch: amd64}
+          - {os: linux, arch: arm64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Build binary and licenses
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.2.0-alpha.1"; fi
+          go run ./cmd/release --os '${{ matrix.os }}' --arch '${{ matrix.arch }}' --version "$version" --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avatarthu-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          cat dist/*.sha256 > dist/SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "AvatarTHU $GITHUB_REF_NAME · Go native" --prerelease --notes 'Native Go executable. No Python, pip, venv or Go runtime installation required. Extract the binary and run init; see README for authentication and optional tools.'
