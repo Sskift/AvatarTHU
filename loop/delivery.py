@@ -44,6 +44,7 @@ def snapshot(st, result, job):
                 z.write(p, p.name)
     st.update(ready=result['ready'], summary=result['summary'], blockers=result['blockers'],
               artifacts=artifacts, report=str(target / 'review.md'),
+              report_sha256=digest(target / 'review.md'), presentation=result.get('presentation', {}),
               submission=str(submit_file) if submit_file else None,
               sha256=digest(submit_file) if submit_file else None, nonce=secrets.token_hex(16),
               deliveries={}, review_doc={}, links_synced=False, links_retry_at=None, status='delivery_pending')
@@ -51,26 +52,8 @@ def snapshot(st, result, job):
 
 
 def deliver(st):
-    # One download package plus one readable card, rather than a message per file.
-    # Large packages use the document's multipart attachment upload instead.
-    files = [('bundle', st['submission'])] if st.get('submission') and Path(st['submission']).stat().st_size <= 20 * 1024 * 1024 else []
-    for label, path in files:
-        if label not in st['deliveries']:
-            st['deliveries'][label] = send(file=Path(path), idem=f'{st["task_id"]}:{st["revision"]}:{label}')
-            save_task(st)
-        delivered = st['deliveries'][label]
-        if not delivered.get('message_app_link'):
-            # Fetch the native message link after persisting the upload/send receipt.
-            # A link lookup failure must never cause a second file send.
-            try:
-                messages = lark('im', '+messages-mget', '--as', 'bot', '--message-ids', delivered['message_id'], '--no-reactions')['messages']
-                match = next(m for m in messages if m['message_id'] == delivered['message_id'])
-                delivered['message_app_link'] = match.get('message_app_link')
-                save_task(st)
-            except Exception:
-                pass  # The file is still available immediately above the card.
+    # The document owns all artifacts; only the approval card goes to the chat.
     publish(st)
-    upload_cover(st)
     if 'card' not in st['deliveries']:
         response = send(content=card(st), idem=f'{st["task_id"]}:{st["revision"]}:card')
         st['deliveries']['card'] = response
@@ -80,41 +63,15 @@ def deliver(st):
     save_task(st)
 
 
-def upload_cover(st):
-    review = st.get('review_doc', {})
-    if review.get('cover') and not review.get('image_key'):
-        from .common import ROOT
-        uploaded = lark('im', 'images', 'create', '--as', 'bot', '--data', '{"image_type":"message"}',
-                        '--file', str(Path(review['cover']).relative_to(ROOT)))
-        review['image_key'] = uploaded['image_key']
-        save_task(st)
-
-
 def refresh_card_links(st):
-    """Retry missing file links without resending artifacts or renewing approval."""
+    """Finish document delivery and refresh the existing approval card in place."""
     if st.get('status') not in {'awaiting', 'needs_student'} or (st.get('links_synced') and st.get('review_doc', {}).get('verified')):
         return
     if st.get('links_retry_at') and now() < datetime.fromisoformat(st['links_retry_at']):
         return
     st['links_retry_at'] = (now() + timedelta(minutes=15)).isoformat()
     save_task(st)
-    # Upgrade existing cards in place without changing their approval identity.
-    if not st.get('review_doc', {}).get('verified'):
-        if st.get('submission') and Path(st['submission']).stat().st_size <= 20 * 1024 * 1024 and 'bundle' not in st['deliveries']:
-            st['deliveries']['bundle'] = send(file=Path(st['submission']), idem=f'{st["task_id"]}:{st["revision"]}:bundle')
-            save_task(st)
-    for label, response in st.get('deliveries', {}).items():
-        if label == 'card' or response.get('message_app_link'):
-            continue
-        messages = lark('im', '+messages-mget', '--as', 'bot', '--message-ids', response['message_id'], '--no-reactions')['messages']
-        match = next(m for m in messages if m['message_id'] == response['message_id'])
-        url = match.get('message_app_link')
-        if not url:
-            raise RuntimeError('飞书暂未返回附件消息链接；稍后重试。')
-        response['message_app_link'] = url
-        save_task(st)
     publish(st)
-    upload_cover(st)
     lark('im', 'messages', 'patch', '--as', 'bot', '--message-id', st['card_message_id'],
          '--data', json.dumps({'content': json.dumps(card(st), ensure_ascii=False)}, ensure_ascii=False))
     st['links_synced'] = True

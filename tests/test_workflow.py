@@ -119,19 +119,30 @@ class WorkflowTests(unittest.TestCase):
             self.delivery.send_notices([{'unread': False}], Mock())
             send.assert_not_called()
 
-    def test_partial_delivery_resumes_without_resending_files(self):
+    def test_card_delivery_retry_never_sends_files_to_chat(self):
         report = Path(self.st['submission']).parent / 'review.md'
         report.write_text('Independent review')
         st = dict(self.st, status='delivery_pending', deliveries={}, report=str(report))
-        with patch.object(self.delivery, 'send', side_effect=[{'message_id': 'file'}, RuntimeError('card failed')]):
+        self.c.save_task(st)
+        with patch.object(self.delivery, 'send', side_effect=RuntimeError('card failed')) as send:
             with self.assertRaises(RuntimeError):
                 self.delivery.deliver(st)
+            self.assertNotIn('file', send.call_args.kwargs)
         saved = self.c.read_json(self.c.task_path(st['task_id']))
         self.assertEqual(saved['status'], 'delivery_pending')
         with patch.object(self.delivery, 'send', return_value={'message_id': 'new-card'}) as send:
             self.delivery.deliver(saved)
             send.assert_called_once()
             self.assertIn('content', send.call_args.kwargs)
+        self.assertEqual(set(saved['deliveries']), {'card'})
+
+    def test_document_failure_sends_no_chat_card_or_attachment(self):
+        st = dict(self.st, status='delivery_pending', deliveries={})
+        with patch.object(self.delivery, 'publish', side_effect=RuntimeError('missing document attachment')), patch.object(self.delivery, 'send') as send:
+            with self.assertRaises(RuntimeError):
+                self.delivery.deliver(st)
+            send.assert_not_called()
+        self.assertEqual(st['status'], 'delivery_pending')
 
     def test_failed_claude_output_not_reused(self):
         job = self.root / 'job'
@@ -254,18 +265,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('private-value', self.c.safe_error('failed https://learn.tsinghua.edu.cn/x?_csrf=private-value&x=y'))
 
     def test_card_links_retry_never_resends_or_changes_approval(self):
-        st = dict(self.st, review_doc={'verified': True}, deliveries={'bundle': {'message_id': 'om_file'}, 'review': {'message_id': 'om_review'}, 'card': {'message_id': 'om_card'}})
-        responses = [{'messages': [{'message_id': 'om_file', 'message_app_link': 'https://applink.feishu.cn/file'}]},
-                     {'messages': [{'message_id': 'om_review', 'message_app_link': 'https://applink.feishu.cn/review'}]}, {}]
-        with patch.object(self.delivery, 'lark', side_effect=responses) as lark, patch.object(self.delivery, 'send') as send:
+        st = dict(self.st, review_doc={'verified': True, 'url': 'https://example.feishu.cn/docx/doc', 'image_key': 'old-cover'},
+                  deliveries={'bundle': {'message_id': 'om_file', 'message_app_link': 'https://applink.feishu.cn/file'},
+                              'review': {'message_id': 'om_review'}, 'card': {'message_id': 'om_card'}})
+        with patch.object(self.delivery, 'lark', return_value={}) as lark, patch.object(self.delivery, 'send') as send:
             self.delivery.refresh_card_links(st)
             self.delivery.refresh_card_links(st)
             send.assert_not_called()
-        self.assertEqual(lark.call_count, 3)
+        self.assertEqual(lark.call_count, 1)
         self.assertTrue(st['links_synced'])
         self.assertEqual(st['nonce'], 'secret-version')
         self.assertEqual(st['status'], 'awaiting')
-        self.assertIn('https://applink.feishu.cn/file', lark.call_args.args[-1])
+        self.assertIn('https://example.feishu.cn/docx/doc', lark.call_args.args[-1])
+        self.assertNotIn('https://applink.feishu.cn/file', lark.call_args.args[-1])
+        self.assertNotIn('old-cover', lark.call_args.args[-1])
+
+    def test_presentation_metadata_requires_frozen_delivered_evidence(self):
+        job = self.root / 'job'
+        (job / 'final').mkdir(parents=True)
+        (job / 'final/answer.txt').write_text('Answer')
+        (job / 'review.md').write_text('Self check')
+        result = {'ready': True, 'summary': 'Done', 'blockers': [], 'files': ['final/answer.txt'],
+                  'presentation': {'assignment': 'Question', 'checks': ['Checked'], 'highlights': []}}
+        self.assertEqual(self.workflow.validate_result(result, job), result)
+        self.delivery.snapshot(self.st, result, job)
+        self.assertEqual(self.st['presentation'], result['presentation'])
+        self.assertEqual(self.st['report_sha256'], self.c.digest(Path(self.st['report'])))
+        result['presentation']['highlights'] = [{'title': 'Evidence', 'detail': 'Look here',
+                                                'artifact': '../secret.png', 'member': ''}]
+        with self.assertRaises(ValueError):
+            self.workflow.validate_result(result, job)
 
     def test_lark_uses_structured_stderr_errors(self):
         fake = Mock(returncode=1, stdout='', stderr=json.dumps({'ok': False, 'error': {'message': 'missing permission'}}))

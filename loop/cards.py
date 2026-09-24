@@ -5,7 +5,6 @@ https://github.com/TWe1v3/Feishu-card-strong (newsletter pattern).
 """
 import html
 import re
-from pathlib import Path
 from urllib.parse import urlencode
 
 
@@ -50,30 +49,15 @@ def assignment(st):
     review = st.get('review_doc', {})
     status = '产物待审阅' if ready else '部分产物 · 需要补充'
     color = 'indigo' if ready else 'orange'
-    info = columns([f'**{status}**\n报告原页、附图、源码和自查集中在审阅文档。',
+    info = columns([f'**{status}**\n作业描述、关键结果和所有产物集中在云文档。',
                     f'截止时间（北京）\n**{escape(st["deadline"])}**\n第 {st["revision"]} 版'],
                    'blue-50' if ready else 'orange-50')
-    links = []
-    for i, artifact in enumerate(st['artifacts']):
-        label = escape(Path(artifact['path']).name)
-        url = st.get('deliveries', {}).get('artifact-' + str(i), {}).get('message_app_link')
-        links.append('• ' + (f'[{label}]({url})' if url and url.startswith('https://') else label))
-    detail = '**本次产物**\n' + ('\n'.join(links) or '尚无可交付文件')
-    report_url = st.get('deliveries', {}).get('review', {}).get('message_app_link')
-    detail += '\n• ' + (f'[执行自查报告]({report_url})' if report_url and report_url.startswith('https://') else '执行自查报告')
-    bundle_url = st.get('deliveries', {}).get('bundle', {}).get('message_app_link')
-    if bundle_url:
-        detail = f'[下载本版完整提交包]({bundle_url})\n\n文档中的批注和编辑不会直接更改提交包。'
-    elif review.get('verified'):
-        detail = '完整提交包在审阅文档内。\n\n文档中的批注和编辑不会直接更改提交包。'
+    detail = '在云文档中查看题目、预览报告、下载全部产物。\n\n文档中的批注和编辑不会直接更改提交文件。'
     if st.get('source_cached'):
         detail += '\n\n基于已下载资料；当前登录待恢复，尚未重新同步。'
     if st.get('blockers'):
         detail += '\n\n**待补充项**\n' + '\n'.join('• ' + escape(b) for b in st['blockers'])
     elements = [info]
-    if review.get('image_key'):
-        elements.append({'tag': 'img', 'img_key': review['image_key'], 'alt': plain('本版产物预览'),
-                         'scale_type': 'fit_horizontal', 'preview': True, 'corner_radius': '8px'})
     controls = []
     if review.get('verified') and review.get('url'):
         controls.append({'tag': 'button', 'text': plain('打开审阅文档'), 'type': 'primary_filled', 'width': 'fill',
@@ -87,7 +71,7 @@ def assignment(st):
     if controls:
         elements.append({'tag': 'column_set', 'flex_mode': 'none', 'horizontal_spacing': '8px',
                          'columns': [{'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [button]} for button in controls]})
-    elements.append(panel('下载与待补充项', detail, expanded=not ready))
+    elements.append(panel('审阅说明与待补充项', detail, expanded=not ready))
     elements.append({'tag': 'form', 'name': 'feedback_form', 'elements': [
         {'tag': 'input', 'name': 'feedback', 'input_type': 'multiline_text', 'rows': 2, 'required': True,
          'label': plain('直接写修改意见'), 'placeholder': plain('例如：报告第 3 页的推导补充中间步骤；案例 4 的输出有问题')},

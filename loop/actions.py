@@ -93,7 +93,7 @@ def act(event):
                 return False
             st.update(status='revision_ready', feedback=feedback, approval_event=None)
             save_task(st)
-            send(content=receipt('已收到修改意见', st['title'], '已排入本地处理队列，完成后会发送新产物和自查报告。'),
+            send(content=receipt('已收到修改意见', st['title'], '已排入本地处理队列，完成后发送新版审阅卡片；产物和自查记录均在云文档中。'),
                  idem='feedback:' + event['event_id'])
             return True
         if (not st.get('ready') or st['status'] != 'awaiting' or st.get('blockers')
