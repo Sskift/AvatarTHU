@@ -44,6 +44,16 @@ func main() {
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	must(cmd.Run())
 	copyFile("README.md", filepath.Join(stage, "README.md"))
+	copyFile("README.en.md", filepath.Join(stage, "README.en.md"))
+	must(filepath.WalkDir("docs/images", func(p string, d os.DirEntry, e error) error {
+		if e != nil {
+			return e
+		}
+		if !d.IsDir() {
+			copyFile(p, filepath.Join(stage, p))
+		}
+		return nil
+	}))
 	copyFile("THIRD_PARTY.md", filepath.Join(stage, "THIRD_PARTY.md"))
 	copyFile("third_party/AutoThu-LICENSE", filepath.Join(stage, "licenses", "AutoThu-LICENSE"))
 	copyFile(filepath.Join(runtime.GOROOT(), "LICENSE"), filepath.Join(stage, "licenses", "Go-LICENSE"))

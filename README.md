@@ -1,8 +1,46 @@
 # AvatarTHU
 
+**简体中文** · [English](README.en.md)
+
 把网络学堂的课程资料、作业处理和本人审阅串起来的本地课程助手。
 
 **现在使用 Go 原生程序。** 每个平台一个可执行文件，不需要安装 Python、pip、虚拟环境、Go 或 Java。空闲时只保留调度进程；有作业时才启动主写和复审 CLI。飞书是可选功能，不启用也可以下载材料、完成作业和本地审阅。
+
+[下载最新版本](https://github.com/Sskift/AvatarTHU/releases) · [反馈问题](https://github.com/Sskift/AvatarTHU/issues) · [来源与许可证](THIRD_PARTY.md)
+
+## 使用效果
+
+下图使用**虚构的演示作业与复审记录**，不代表真实作业完成或模型复审结果。卡片是程序生成的 JSON 的本地渲染预览，云文档是实际飞书正文截图。截图仅保留产品内容，不包含姓名、头像、学号、账号、私人链接或真实课程资料。详见[截图说明](docs/images/README.md)。
+
+### 1. 在卡片里决定下一步
+
+查看当前版本与复审状态，打开完整文档，填写修改意见；由本人决定是否提交。
+
+<img src="docs/images/review-card.png" alt="飞书审阅卡片：当前版本、独立复审状态、文档入口、按批注修改和本人确认提交" width="720">
+
+### 2. 在云文档里对照题目和结果
+
+作业描述、编号要求和结果表分节呈现，先看需要做什么，再看这一版做出了什么。
+
+![云文档中的作业描述与关键结果](docs/images/review-document.png)
+
+### 3. 集中查看文件和历次复审
+
+产物使用原生附件，可以直接预览或下载；文档末尾保留每轮复审的结论、具体评论和待核对项。
+
+<details>
+<summary>查看完整产物截图</summary>
+
+![云文档中的完整产物与原生附件](docs/images/review-files.png)
+
+</details>
+
+<details>
+<summary>查看历次独立复审截图</summary>
+
+![云文档中的独立复审记录](docs/images/review-history.png)
+
+</details>
 
 ## 安装与启动
 
@@ -167,6 +205,6 @@ go run ./cmd/release --os windows --arch amd64 --out dist
 
 CI 在 macOS、Windows 和 Linux 上检查核心工作流与全新安装。发布支持 macOS arm64 / amd64、Windows amd64 / arm64、Linux amd64 / arm64，附带 SHA256SUMS 与第三方许可证。
 
-当前为 **Alpha**，适合愿意自行审阅作业、反馈问题的使用者试用。需要长期跨账号验证学校端变化、不同课程材料与各平台浏览器认证。仓库是否可见取决于 GitHub 的访问权限；私有仓库的 Release 也需要相应权限。
+当前为 **Alpha**，适合愿意自行审阅作业、反馈问题的使用者试用。需要长期跨账号验证学校端变化、不同课程材料与各平台浏览器认证。仓库与 Release 已公开，欢迎试用和提交 Issue。
 
 网络学堂相关接口和 macOS 会话导入改写自 AutoThu 及我们的登录、保活贡献，已经内置在本项目中。来源与许可证见 [THIRD_PARTY.md](THIRD_PARTY.md)。
