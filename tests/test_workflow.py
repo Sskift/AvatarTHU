@@ -17,6 +17,9 @@ class WorkflowTests(unittest.TestCase):
         self.c = importlib.reload(common)
         self.learn = importlib.reload(learn)
         self.delivery = importlib.reload(delivery)
+        publisher = patch.object(self.delivery, 'publish', return_value={'verified': True})
+        publisher.start()
+        self.addCleanup(publisher.stop)
         self.workflow = importlib.reload(workflow)
         self.actions = importlib.reload(actions)
         self.messages = importlib.reload(messages)
@@ -120,7 +123,7 @@ class WorkflowTests(unittest.TestCase):
         report = Path(self.st['submission']).parent / 'review.md'
         report.write_text('Independent review')
         st = dict(self.st, status='delivery_pending', deliveries={}, report=str(report))
-        with patch.object(self.delivery, 'send', side_effect=[{'message_id': 'file'}, {'message_id': 'review'}, RuntimeError('card failed')]):
+        with patch.object(self.delivery, 'send', side_effect=[{'message_id': 'file'}, RuntimeError('card failed')]):
             with self.assertRaises(RuntimeError):
                 self.delivery.deliver(st)
         saved = self.c.read_json(self.c.task_path(st['task_id']))
@@ -251,7 +254,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('private-value', self.c.safe_error('failed https://learn.tsinghua.edu.cn/x?_csrf=private-value&x=y'))
 
     def test_card_links_retry_never_resends_or_changes_approval(self):
-        st = dict(self.st, deliveries={'artifact-0': {'message_id': 'om_file'}, 'review': {'message_id': 'om_review'}, 'card': {'message_id': 'om_card'}})
+        st = dict(self.st, review_doc={'verified': True}, deliveries={'bundle': {'message_id': 'om_file'}, 'review': {'message_id': 'om_review'}, 'card': {'message_id': 'om_card'}})
         responses = [{'messages': [{'message_id': 'om_file', 'message_app_link': 'https://applink.feishu.cn/file'}]},
                      {'messages': [{'message_id': 'om_review', 'message_app_link': 'https://applink.feishu.cn/review'}]}, {}]
         with patch.object(self.delivery, 'lark', side_effect=responses) as lark, patch.object(self.delivery, 'send') as send:
@@ -269,6 +272,25 @@ class WorkflowTests(unittest.TestCase):
         with patch('loop.common.subprocess.run', return_value=fake):
             with self.assertRaisesRegex(RuntimeError, 'missing permission'):
                 self.c.lark('im')
+
+    def test_document_feedback_checks_owner_version_and_invalidates_submit(self):
+        from loop import review
+        st = dict(self.st, review_doc={'verified': True, 'url': 'https://example.feishu.cn/docx/doc'})
+        self.c.save_task(st)
+        event = dict(self.event, action_value=json.dumps({'task_id': st['task_id'], 'revision': 1, 'nonce': st['nonce'], 'action': 'revise_comments'}))
+        with patch.object(review, 'comments', return_value=[{'quote': 'Equation 1', 'text': 'Show the derivation'}]) as comments, patch.object(self.actions, 'send'):
+            self.assertFalse(self.actions.act(dict(event, operator_id='stranger')))
+            self.assertFalse(self.actions.act(dict(event, message_id='old-card')))
+            comments.assert_not_called()
+            self.assertTrue(self.actions.act(event))
+            self.assertFalse(self.actions.act(event))
+            comments.assert_called_once()
+        saved = self.c.read_json(self.c.task_path(st['task_id']))
+        self.assertEqual(saved['status'], 'revision_ready')
+        self.assertIn('Equation 1', saved['feedback'])
+        with patch.object(self.learn, 'upload') as upload:
+            self.assertFalse(self.actions.act(self.event))
+            upload.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()

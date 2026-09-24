@@ -57,7 +57,7 @@ def act(event):
         tid, action = matches[0]['task_id'], 'revise'
     else:
         tid, action = value.get('task_id'), value.get('action')
-    if action not in {'submit', 'revise'}:
+    if action not in {'submit', 'revise', 'revise_comments'}:
         return False
     try:
         path = task_path(tid)
@@ -69,6 +69,21 @@ def act(event):
             return False
         if not event.get('message_id') or event['message_id'] != st.get('card_message_id'):
             return False
+        if action == 'revise_comments':
+            if (value.get('revision') != st['revision'] or not hmac.compare_digest(str(value.get('nonce', '')), st['nonce'])
+                    or not st.get('review_doc', {}).get('verified')):
+                return False
+            from .review import comments
+            entries = comments(st)
+            if not entries:
+                send(content=receipt('尚未发现可处理的批注', st['title'], '请先在审阅文档中添加文字批注，再点“按文档批注修改”。也可以在卡片内直接填写意见。'),
+                     idem='no-comments:' + event['event_id'])
+                return False
+            feedback = '\n\n'.join(f'位置与上下文：{e.get("context") or "以引用原文和意见定位"}\n引用：{e["quote"]}\n修改意见：{e["text"]}' for e in entries)
+            st.update(status='revision_ready', feedback=feedback, approval_event=None, review_comments=entries)
+            save_task(st)
+            send(content=receipt('已收到文档批注', st['title'], f'已收集 {len(entries)} 条意见，下一版会逐项处理。'), idem='comments:' + event['event_id'])
+            return True
         if action == 'revise':
             form = event.get('form_value') or '{}'
             if isinstance(form, str):

@@ -47,9 +47,10 @@ def frame(title, subtitle, color, elements, tag=None):
 
 def assignment(st):
     ready = st['ready']
-    status = '已完成自查 · 待你决定' if ready else '已完成自查 · 需要补充'
+    review = st.get('review_doc', {})
+    status = '产物待审阅' if ready else '部分产物 · 需要补充'
     color = 'indigo' if ready else 'orange'
-    info = columns([f'**{status}**\n{escape(st["summary"][:260])}',
+    info = columns([f'**{status}**\n报告原页、附图、源码和自查集中在审阅文档。',
                     f'截止时间（北京）\n**{escape(st["deadline"])}**\n第 {st["revision"]} 版'],
                    'blue-50' if ready else 'orange-50')
     links = []
@@ -60,19 +61,36 @@ def assignment(st):
     detail = '**本次产物**\n' + ('\n'.join(links) or '尚无可交付文件')
     report_url = st.get('deliveries', {}).get('review', {}).get('message_app_link')
     detail += '\n• ' + (f'[执行自查报告]({report_url})' if report_url and report_url.startswith('https://') else '执行自查报告')
-    detail += '\n\n点击文件名查看，附件也已发送到本对话。'
+    bundle_url = st.get('deliveries', {}).get('bundle', {}).get('message_app_link')
+    if bundle_url:
+        detail = f'[下载本版完整提交包]({bundle_url})\n\n文档中的批注和编辑不会直接更改提交包。'
+    elif review.get('verified'):
+        detail = '完整提交包在审阅文档内。\n\n文档中的批注和编辑不会直接更改提交包。'
     if st.get('source_cached'):
         detail += '\n\n基于已下载资料；当前登录待恢复，尚未重新同步。'
     if st.get('blockers'):
         detail += '\n\n**待补充项**\n' + '\n'.join('• ' + escape(b) for b in st['blockers'])
-    elements = [info, panel('产物与检查详情', detail, expanded=not ready)]
+    elements = [info]
+    if review.get('image_key'):
+        elements.append({'tag': 'img', 'img_key': review['image_key'], 'alt': plain('本版产物预览'),
+                         'scale_type': 'fit_horizontal', 'preview': True, 'corner_radius': '8px'})
+    controls = []
+    if review.get('verified') and review.get('url'):
+        controls.append({'tag': 'button', 'text': plain('打开审阅文档'), 'type': 'primary_filled', 'width': 'fill',
+                         'behaviors': [{'type': 'open_url', 'default_url': review['url']}]})
+        controls.append({'tag': 'button', 'text': plain('按文档批注修改'), 'type': 'default', 'width': 'fill',
+                         'behaviors': [{'type': 'callback', 'value': {'task_id': st['task_id'], 'revision': st['revision'], 'nonce': st['nonce'], 'action': 'revise_comments'}}]})
     if ready:
         value = {'task_id': st['task_id'], 'revision': st['revision'], 'nonce': st['nonce'], 'action': 'submit'}
-        elements.append({'tag': 'button', 'text': plain('确认，提交本版产物'), 'type': 'primary_filled', 'width': 'fill',
+        controls.append({'tag': 'button', 'text': plain('审阅完成，提交本版'), 'type': 'default', 'width': 'fill',
                          'behaviors': [{'type': 'callback', 'value': value}]})
+    if controls:
+        elements.append({'tag': 'column_set', 'flex_mode': 'none', 'horizontal_spacing': '8px',
+                         'columns': [{'tag': 'column', 'width': 'weighted', 'weight': 1, 'elements': [button]} for button in controls]})
+    elements.append(panel('下载与待补充项', detail, expanded=not ready))
     elements.append({'tag': 'form', 'name': 'feedback_form', 'elements': [
         {'tag': 'input', 'name': 'feedback', 'input_type': 'multiline_text', 'rows': 2, 'required': True,
-         'label': plain('还需要调整？'), 'placeholder': plain('例如：补充第二题推导；我已放入自己的程序，请重新检查')},
+         'label': plain('直接写修改意见'), 'placeholder': plain('例如：报告第 3 页的推导补充中间步骤；案例 4 的输出有问题')},
         {'tag': 'button', 'name': 'revise', 'form_action_type': 'submit', 'text': plain('按意见修改'), 'type': 'default'}]})
     # The form footer is folded into the same block to stay within five visual groups.
     elements[-1]['elements'].append(md('<font color="grey">修改后会发送新版本；上版提交按钮随即失效。</font>'))

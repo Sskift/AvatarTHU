@@ -59,7 +59,7 @@ def run(*, tick=False, sync_only=False, selected=None):
             for old in tasks():
                 if selected and old['task_id'] != selected:
                     continue
-                if old.get('status') in {'awaiting', 'needs_student'} and not old.get('links_synced'):
+                if old.get('status') in {'awaiting', 'needs_student'} and (not old.get('links_synced') or not old.get('review_doc', {}).get('verified')):
                     with lock(old['task_id']):
                         try:
                             refresh_card_links(read_json(task_path(old['task_id'])))
