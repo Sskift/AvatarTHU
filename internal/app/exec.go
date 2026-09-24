@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -91,10 +92,44 @@ func findExecutable(name, configured string) string {
 			continue
 		}
 		if v, e := exec.LookPath(p); e == nil {
+			if name == "lark-cli" {
+				return nativeLark(v)
+			}
 			return v
 		}
 	}
 	return ""
+}
+
+// Official npm installations already contain a native Lark executable. Reuse
+// it so an idle event subscription doesn't keep an extra Node launcher alive.
+func nativeLark(launcher string) string {
+	real, err := filepath.EvalSymlinks(launcher)
+	if err != nil {
+		return launcher
+	}
+	dirs := []string{filepath.Dir(filepath.Dir(real)), filepath.Join(filepath.Dir(real), "node_modules", "@larksuite", "cli")}
+	for _, dir := range dirs {
+		b, e := os.ReadFile(filepath.Join(dir, "package.json"))
+		if e != nil {
+			continue
+		}
+		var pkg M
+		if json.Unmarshal(b, &pkg) != nil || str(pkg, "name") != "@larksuite/cli" {
+			continue
+		}
+		name := "lark-cli"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		native := filepath.Join(dir, "bin", name)
+		if exists(native) && !exists(native+".old") {
+			if p, e := exec.LookPath(native); e == nil {
+				return p
+			}
+		}
+	}
+	return launcher
 }
 func diagnosticError(tool, text, log string) error {
 	low := strings.ToLower(text)

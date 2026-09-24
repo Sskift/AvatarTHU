@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 func same(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
@@ -235,7 +236,8 @@ func (a *App) message(event M) bool {
 }
 func (a *App) consume(ctx context.Context, key, name string, handler func(M) bool) {
 	exe := findExecutable("lark-cli", str(a.config(), "lark_cli"))
-	cmd := command(ctx, exe, "event", "consume", key, "--as", "bot")
+	// Closing stdin lets Lark unsubscribe cleanly before forced process cleanup.
+	cmd := command(context.WithoutCancel(ctx), exe, "event", "consume", key, "--as", "bot")
 	cmd.Dir = a.Root
 	input, e := cmd.StdinPipe()
 	check(e)
@@ -246,6 +248,28 @@ func (a *App) consume(ctx context.Context, key, name string, handler func(M) boo
 	check(e)
 	check(cmd.Start())
 	defer bindProcess(cmd)()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+			_ = input.Close()
+		}
+		select {
+		case <-done:
+			return
+		case <-time.After(5 * time.Second):
+			_ = cmd.Cancel()
+		}
+		select {
+		case <-done:
+			return
+		case <-time.After(5 * time.Second):
+			_ = cmd.Process.Kill()
+		}
+	}()
 	health := a.data(name + "-health.json")
 	writeJSON(health, M{"state": "starting", "pid": cmd.Process.Pid, "time": stamp()})
 	var wg sync.WaitGroup

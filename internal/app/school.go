@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -134,6 +135,9 @@ func (a *App) schoolFrom(m M) *School {
 		if len(via) >= 10 {
 			return fmt.Errorf("网络学堂重定向过多")
 		}
+		if schoolDomain(req.URL.Hostname()) && strings.Contains(req.URL.Path, "login_timeout") {
+			return sessionExpired{"网络学堂登录过期，请运行 avatarthu login thu"}
+		}
 		if !schoolDomain(req.URL.Hostname()) || req.URL.Scheme != "https" {
 			return fmt.Errorf("网络学堂请求跳转到外部站点")
 		}
@@ -213,6 +217,12 @@ func (s *School) request(method, path string, params url.Values, body io.Reader,
 		req.Header.Set("Content-Type", ctype)
 	}
 	r, e := s.HTTP.Do(req)
+	if e != nil {
+		var expired sessionExpired
+		if errors.As(e, &expired) {
+			panic(expired)
+		}
+	}
 	check(e)
 	if r.StatusCode == 401 || r.StatusCode == 403 {
 		r.Body.Close()

@@ -14,7 +14,7 @@ func setupProcess(cmd *exec.Cmd) {
 		if cmd.Process == nil {
 			return nil
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 	}
 }
 func bindProcess(cmd *exec.Cmd) func() {

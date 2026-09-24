@@ -596,7 +596,11 @@ func TestRealCLIs(t *testing.T) {
 				}
 			}
 			st["title"] = "原生迁移算术验证"
-			st["description"] = "请计算 17×23，仅在 final/answer.txt 写出一个十进制整数。另写 review.md 说明实际检查。无需报告、联网、PDF或额外软件。"
+			st["description"] = "请计算 17×23，仅交付 answer.txt，内容为一个十进制整数。无需报告、联网、PDF或额外软件。"
+			if str(st, "status") == "needs_student" {
+				st["status"] = "revision_ready"
+				st["feedback"] = "测试原题资料已修正：只需计算 17×23 并交付 answer.txt，请依据当前 input 重新核对。"
+			}
 			writeFile(filepath.Join(str(st, "folder"), "question.txt"), []byte("计算 17×23，答案只写一个十进制整数。"), 0600)
 			a.process(st)
 			if str(st, "status") != "awaiting" || str(st, "review_outcome") != "approved" {

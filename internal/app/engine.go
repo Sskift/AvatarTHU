@@ -148,6 +148,8 @@ presentation.assignment 用简明段落或有序列表概括题意；checks 写�
 func reviewerPrompt(job string) string {
 	return `你是独立的作业复审者，工作目录：` + job + `。
 input/ 是原始题目和课件；candidate/ 是当前候选产物。先从题目提炼要求，再独立核对答案、推导、代码、报告和结果。
+candidate/ 是程序从主写 final/ 逐文件复制的审阅副本，内部相对路径保持一致；这两个目录前缀的不同不是产物路径错误。
+主写流程的 review.md 自查被刻意隔离，不因其未出现在候选副本中判定漏交。原题要求提交的报告、代码、答案等文件仍须在 candidate/ 中逐项核对。
 不提供主写会话、自查或之前复审结论。不要读取上级目录、其他尝试、历史会话、记忆、账号或提交接口。产物自称正确不能作为证据。
 可在 scratch/ 运行、计算或复现检查；需要修改文件先复制至 scratch/，不修改 input/、candidate/ 或主写原文件。
 不要代写，不调用其他模型或 agent。只记录实际做过的检查；无法确认的内容写入 limitations。重要内容无法确认或存在正确性/完整性问题就 approved=false，给出具体位置、理由、可执行建议。
