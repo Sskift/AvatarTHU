@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Run in the repository venv when present; otherwise use the autothu conda env.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  exec "$ROOT/.venv/bin/python" "$ROOT/scripts/thu_learn_cli.py" "$@"
+fi
+if command -v conda &>/dev/null; then
+  source "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate autothu 2>/dev/null || true
+fi
+exec python "$ROOT/scripts/thu_learn_cli.py" "$@"
