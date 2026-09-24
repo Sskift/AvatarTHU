@@ -183,12 +183,22 @@ class IntegrationTests(unittest.TestCase):
         claude = self.root / 'claude'
         claude.touch()
         with patch.object(install, 'SOURCE', source), patch.object(install.shutil, 'which', return_value=str(claude)) as which, patch.object(install.subprocess, 'run') as run, patch.object(install.subprocess, 'check_output', return_value='revision'):
-            install.main(['--no-lark', '--no-start', '--skip-login'])
-        which.assert_called_once_with('claude')
-        self.assertEqual(run.call_count, 1)
+            for mode in ('--no-lark', '--lark'):
+                install.main([mode, '--no-start', '--skip-login'])
+        self.assertEqual(which.call_count, 2)
+        self.assertTrue(all(call.args == ('claude',) for call in which.call_args_list))
+        self.assertEqual(run.call_count, 2)
         self.assertIn('ensure_thu(skip_login=True)', run.call_args.args[0][-1])
         self.assertFalse(self.c.lark_enabled())
         self.assertTrue((self.root / 'bin/avatarthu').exists())
+
+    def test_unified_manual_run_records_retry_and_local_error(self):
+        from loop import cli
+        with patch('sys.argv', ['avatarthu', 'run', '--sync-only']), patch.object(self.daily, 'sync', side_effect=RuntimeError('offline')), self.assertRaises(SystemExit) as stop:
+            cli.main()
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIn('next_sync_retry_at', self.c.read_json(self.c.DATA / 'schedule.json'))
+        self.assertTrue(self.c.read_json(self.c.DATA / 'notifications.json'))
 
     def test_school_client_import_has_no_checkout_dependency(self):
         from loop.thulearn.client import ThuLearnClient

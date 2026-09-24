@@ -1,5 +1,6 @@
 """The installed AvatarTHU command; no external AutoThu checkout is required."""
 import argparse
+import subprocess
 import sys
 from . import common as c
 
@@ -41,12 +42,12 @@ def main():
             from .local_review import revise
             revise(args.task_id, args.feedback)
         elif args.command == 'run':
-            from .daily import run
-            run(sync_only=args.sync_only, selected=args.task)
+            from .daily import main as daily
+            daily((['--sync-only'] if args.sync_only else []) + (['--task', args.task] if args.task else []))
         elif args.command == 'uninstall':
             from .services import uninstall
             uninstall()
-    except (RuntimeError, OSError, ValueError) as exc:
+    except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as exc:
         print(c.safe_error(exc), file=sys.stderr)
         return 1
     return 0

@@ -94,12 +94,12 @@ def run(*, tick=False, sync_only=False, selected=None):
         print('A run is already active; no duplicate run started.', flush=True)
 
 
-def main():
+def main(argv=None):
     p = argparse.ArgumentParser()
     p.add_argument('--tick', action='store_true')
     p.add_argument('--sync-only', action='store_true')
     p.add_argument('--task')
-    args = p.parse_args()
+    args = p.parse_args(argv)
     try:
         run(tick=args.tick, sync_only=args.sync_only, selected=args.task)
     except Exception as exc:

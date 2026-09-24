@@ -82,10 +82,11 @@ def main(argv=None):
         courses.symlink_to(RUNTIME / 'data/courses', target_is_directory=True)
     subprocess.run([str(python), '-c', 'from loop.auth import ensure_thu; ensure_thu(skip_login=' + str(args.skip_login) + ')'], cwd=RUNTIME, check=True)
     lark_error = False
-    if args.lark is True or (c.lark_enabled() and not args.skip_login):
-        # Explicit --lark still authorizes login even when school login is skipped.
+    if not args.skip_login and (args.lark is True or c.lark_enabled()):
         result = subprocess.run([str(python), '-m', 'loop.cli', 'login', 'lark', '--no-start'], cwd=RUNTIME)
         lark_error = result.returncode != 0
+    elif args.lark is True and not c.lark_enabled():
+        print('已跳过飞书交互授权；稍后运行 ./avatarthu login lark 完成启用。')
     if not args.no_start:
         subprocess.run([str(python), '-m', 'loop.services'], cwd=RUNTIME, check=True)
     try:
