@@ -52,6 +52,13 @@ class SchedulerTests(unittest.TestCase):
             sync.assert_not_called()
             process.assert_called_once()
 
+    def test_failed_extra_sync_retries_even_after_success_that_day(self):
+        self.c.write_json(self.c.DATA / 'schedule.json', {'last_sync_date': '2026-09-24', 'next_sync_retry_at': '2026-09-24T09:15:00+08:00'})
+        with patch.object(self.d, 'sync') as sync, patch.object(self.d, 'now', return_value=datetime(2026,9,24,9,16,tzinfo=self.c.TZ)):
+            self.d.run(tick=True)
+            self.d.run(tick=True)
+            sync.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -49,7 +49,7 @@ def run(*, tick=False, sync_only=False, selected=None):
             schedule = read_json(DATA / 'schedule.json')
             today = now().date().isoformat()
             retry_at = schedule.get('next_sync_retry_at')
-            due = ((now().hour, now().minute) >= tuple(map(int, config().get('daily_time', '08:00').split(':'))) and schedule.get('last_sync_date') != today
+            due = ((now().hour, now().minute) >= tuple(map(int, config().get('daily_time', '08:00').split(':'))) and (schedule.get('last_sync_date') != today or bool(retry_at))
                    and (not retry_at or now() >= datetime.fromisoformat(retry_at)))
             if not tick or due:
                 sync()

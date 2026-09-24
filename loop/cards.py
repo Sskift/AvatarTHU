@@ -6,6 +6,7 @@ https://github.com/TWe1v3/Feishu-card-strong (newsletter pattern).
 import html
 import re
 from pathlib import Path
+from urllib.parse import urlencode
 
 
 def plain(text):
@@ -85,11 +86,16 @@ def notice_digest(notes, date_text):
         # Keep source paragraphs and line breaks; never try to render arbitrary source HTML/Markdown.
         body = note['body'][:3500]
         suffix = '\n\n原文较长，完整内容见网络学堂。' if len(note['body']) > len(body) else ''
+        if note.get('attachment_name'):
+            suffix += '\n\n公告附件：' + escape(note['attachment_name'])
         elements.append(panel(f'{note["course"]} · {note["title"]}',
                               f'<font color="grey">{escape(note["date"])}</font>\n\n' + escape(body) + suffix,
                               expanded=len(notes) == 1))
-    elements.append({'tag': 'button', 'text': plain('打开网络学堂'), 'type': 'default',
-                     'behaviors': [{'type': 'open_url', 'default_url': 'https://learn.tsinghua.edu.cn/'}]})
+    url = 'https://learn.tsinghua.edu.cn/'
+    if len(notes) == 1 and notes[0].get('course_id') and notes[0].get('id'):
+        url += 'f/wlxt/kcgg/wlkc_ggb/student/beforeViewXs?' + urlencode({'wlkcid': notes[0]['course_id'], 'id': notes[0]['id']})
+    elements.append({'tag': 'button', 'text': plain('查看公告原文与附件'), 'type': 'primary_filled', 'width': 'fill',
+                     'behaviors': [{'type': 'open_url', 'default_url': url}]})
     return frame('网络学堂 · 今日更新', '课程公告', 'turquoise', elements)
 
 
