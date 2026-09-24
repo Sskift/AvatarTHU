@@ -40,6 +40,9 @@ func New(ctx context.Context, root string) *App {
 		root = defaultRoot()
 	}
 	root = abs(root)
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
 	a := &App{Root: root, Ctx: ctx}
 	return a
 }

@@ -589,6 +589,12 @@ func TestRealCLIs(t *testing.T) {
 			mkdir(a.Root)
 			a.saveConfig(M{"lark_enabled": false, "review_mode": mode, "max_review_rounds": 1, "stage_timeout": 240})
 			st := fixture(t, a)
+			if os.Getenv("AVATARTHU_RESUME_SMOKE") == "1" {
+				saved := readMap(a.taskPath(str(st, "task_id")))
+				if len(saved) > 0 {
+					st = saved
+				}
+			}
 			st["title"] = "原生迁移算术验证"
 			st["description"] = "请计算 17×23，仅在 final/answer.txt 写出一个十进制整数。另写 review.md 说明实际检查。无需报告、联网、PDF或额外软件。"
 			writeFile(filepath.Join(str(st, "folder"), "question.txt"), []byte("计算 17×23，答案只写一个十进制整数。"), 0600)
@@ -628,5 +634,46 @@ func TestLiveDocumentParse(t *testing.T) {
 			t.Fatalf("parser failed: %s", jsonBytes(r))
 		}
 		t.Logf("native document accepted by Lark parser: %d attachments, %d images", len(texts(meta["attachment_names"])), number(meta, "image_count", 0))
+	}
+}
+
+func TestWriterAcceptsUnambiguousFinalRelativeName(t *testing.T) {
+	a := testApp(t)
+	job := filepath.Join(a.Root, "job")
+	r := resultAt(job, "2")
+	r["files"] = []string{"答案.txt"}
+	v := validateWriter(r, job)
+	if texts(v["files"])[0] != "final/答案.txt" {
+		t.Fatal(v)
+	}
+	r["files"] = []string{"../review.md"}
+	expectError(t, "", func() { validateWriter(r, job) })
+}
+
+func TestProcessHelper(t *testing.T) {
+	if os.Getenv("AVATARTHU_PROCESS_HELPER") != "1" {
+		return
+	}
+	arg := os.Args[len(os.Args)-1]
+	if arg == "wait" {
+		time.Sleep(10 * time.Second)
+	}
+	fmt.Print(arg)
+	os.Exit(0)
+}
+func TestProcessCaptureAndCancellation(t *testing.T) {
+	a := testApp(t)
+	t.Setenv("AVATARTHU_PROCESS_HELPER", "1")
+	exe, e := os.Executable()
+	check(e)
+	arg := `中文 a&b"c\ path`
+	out, _, e := capture(a.Ctx, a.Root, 10*time.Second, exe, "-test.run=^TestProcessHelper$", "--", arg)
+	if e != nil || string(out) != arg {
+		t.Fatalf("argument transport: %q, %v", out, e)
+	}
+	started := time.Now()
+	_, _, e = capture(a.Ctx, a.Root, 300*time.Millisecond, exe, "-test.run=^TestProcessHelper$", "--", "wait")
+	if e == nil || time.Since(started) > 5*time.Second {
+		t.Fatalf("cancellation failed: %v", e)
 	}
 }

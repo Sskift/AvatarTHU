@@ -113,6 +113,20 @@ func validateWriter(r M, job string) M {
 	ensure(ok, "主写未返回摘要")
 	ensure(r["files"] != nil && r["blockers"] != nil, "主写未返回产物或阻塞事项列表")
 	files := texts(r["files"])
+	// CLIs sometimes report names relative to final/ despite having created the
+	// right files. Resolve that unambiguous form within final/, never outside it.
+	for i, p := range files {
+		if !strings.HasPrefix(filepath.ToSlash(p), "final/") {
+			inside(filepath.Join(job, "final"), p)
+			files[i] = "final/" + filepath.ToSlash(p)
+			for _, point := range objects(obj(r, "presentation")["highlights"]) {
+				if str(point, "artifact") == p {
+					point["artifact"] = files[i]
+				}
+			}
+		}
+	}
+	r["files"] = files
 	blockers := texts(r["blockers"])
 	ensure(!boolean(r, "ready") || len(files) > 0, "没有交付产物")
 	seen := map[string]bool{}
@@ -157,7 +171,17 @@ func (a *App) writer(job, prompt string, plan M) M {
 		ensure(reflect.DeepEqual(expected, actual), "已完成产物发生变化，需要创建新版本")
 		return r
 	}
-	r := validateWriter(a.engine(str(plan, "writer"), job, prompt, writerSchema, "writer", plan), job)
+	var raw M
+	if done := readMap(filepath.Join(job, "execution.json")); str(done, "role") == "writer" && str(done, "completed_at") != "" {
+		if str(done, "executor") == "claude" {
+			raw = obj(readMap(filepath.Join(job, "claude.json")), "structured_output")
+		} else {
+			raw = readMap(filepath.Join(job, "engine-output.json"))
+		}
+	} else {
+		raw = a.engine(str(plan, "writer"), job, prompt, writerSchema, "writer", plan)
+	}
+	r := validateWriter(raw, job)
 	writeJSON(filepath.Join(job, "result.json"), r)
 	writeJSON(completed, M{"finished_at": stamp(), "hashes": hashesFor(job, append(texts(r["files"]), "review.md"))})
 	return r
@@ -272,7 +296,7 @@ func (a *App) process(st M) {
 	for {
 		check(a.Ctx.Err())
 		job = str(st, "job")
-		if job == "" || !exists(filepath.Join(job, "complete.json")) {
+		if job == "" || (!exists(filepath.Join(job, "complete.json")) && str(readMap(filepath.Join(job, "execution.json")), "completed_at") == "") {
 			base := strDefault(st, "assignment_dir", a.data("jobs", str(st, "task_id")))
 			job = filepath.Join(base, "runs", fmt.Sprintf("r%d", number(st, "revision", 1)), fmt.Sprintf("round-%d", number(st, "review_round", 1)), "writer-"+randomID(5))
 			mkdir(job)
