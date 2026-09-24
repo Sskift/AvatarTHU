@@ -1,5 +1,7 @@
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
+markdown-it-py>=3,<5
+mdit-py-plugins>=0.4,<1
 thulearn2018
 requests-toolbelt>=1,<2
 pymupdf>=1.24,<2

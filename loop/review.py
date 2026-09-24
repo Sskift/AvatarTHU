@@ -10,6 +10,7 @@ import stat
 import zipfile
 from pathlib import Path, PurePosixPath
 from . import common as c
+from .markup import markdown_xml, extracted_text_xml
 
 TEXT_SUFFIXES = {'.py', '.js', '.ts', '.tsx', '.jsx', '.c', '.cpp', '.h', '.java', '.rs', '.go', '.sh', '.bat', '.md', '.txt', '.tex', '.json', '.html', '.css'}
 IMAGE_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp'}
@@ -25,46 +26,8 @@ def paragraph(value):
     return '<p>' + esc(value).replace('\n', '<br/>') + '</p>'
 
 
-def rich_text(value):
-    text = esc(value)
-    return re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', text)
-
-
-def prose(value):
-    """Preserve supplied text without interpreting arbitrary XML or remote media."""
-    blocks = []
-    code = None
-    table = []
-    def flush_table():
-        if table:
-            rows = []
-            for i, row in enumerate(table):
-                tag = 'th' if i == 0 else 'td'
-                rows.append('<tr>' + ''.join(f'<{tag}><p>{rich_text(cell)}</p></{tag}>' for cell in row) + '</tr>')
-            blocks.append('<table><thead>' + rows[0] + '</thead><tbody>' + ''.join(rows[1:]) + '</tbody></table>')
-            table.clear()
-    for line in value.splitlines():
-        if code is None and line.strip().startswith('|') and line.strip().endswith('|'):
-            cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
-            if not all(re.fullmatch(r':?-+:?', cell) for cell in cells):
-                table.append(cells)
-            continue
-        flush_table()
-        if line.startswith('```'):
-            if code is None:
-                code = []
-            else:
-                blocks.append('<pre><code>' + esc('\n'.join(code)) + '</code></pre>')
-                code = None
-        elif code is not None:
-            code.append(line)
-        elif line.strip():
-            match = re.match(r'^#{1,6}\s+(.+)', line)
-            blocks.append('<h2>' + esc(match[1]) + '</h2>' if match else '<p>' + rich_text(line) + '</p>')
-    if code:
-        blocks.append(paragraph('\n'.join(code)))
-    flush_table()
-    return ''.join(blocks)
+def prose(value, base_level=2):
+    return markdown_xml(value, base_level=base_level)
 
 
 def zip_previews(path):
@@ -106,7 +69,7 @@ def build(st, draft):
     if st.get('feedback'):
         blocks += ['<h1>本版修改要求</h1>', paragraph(st['feedback'])]
     blocks += ['<h1>审阅顺序与下载</h1>',
-               paragraph('1. 对照题目要求；2. 阅读报告原页和图；3. 查看源码与运行说明；4. 核对执行自查及未完成项。')]
+               '<ol><li>对照题目要求</li><li>阅读报告原页和图</li><li>查看源码与运行说明</li><li>核对执行自查及未完成项</li></ol>']
     bundle_url = st.get('deliveries', {}).get('bundle', {}).get('message_app_link')
     if bundle_url:
         blocks += ['<p><a href="' + esc(bundle_url) + '">下载本版完整提交包</a></p>']
@@ -122,7 +85,7 @@ def build(st, draft):
     if inputs and inputs.exists():
         for p in sorted(inputs.rglob('*.pdf.txt'))[:8]:
             text = p.read_text(errors='replace')
-            blocks += ['<h2>' + esc(p.name.removesuffix('.txt')) + '</h2>', paragraph(text[:18000])]
+            blocks += ['<h2>' + esc(p.name.removesuffix('.txt')) + '</h2>', extracted_text_xml(text[:18000])]
             if len(text) > 18000:
                 blocks += [paragraph('题面文本较长，仅展开前 18000 字符；原附件保存在课程文件夹。')]
     images = []
@@ -190,7 +153,7 @@ def build(st, draft):
         remaining -= len(text)
         blocks += ['<h2>' + esc(name) + '</h2>']
         if suffix in {'.md', '.txt'}:
-            blocks += [prose(text)]
+            blocks += [prose(text, base_level=3)]
         else:
             lang = {'.py': 'python', '.js': 'javascript', '.ts': 'typescript', '.sh': 'bash', '.html': 'html'}.get(suffix, 'plain text')
             lines = text.splitlines(keepends=True)
