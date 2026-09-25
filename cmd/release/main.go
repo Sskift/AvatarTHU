@@ -26,7 +26,7 @@ func must(err error) {
 }
 func main() {
 	dest := flag.String("out", "dist", "output directory")
-	version := flag.String("version", "0.2.0-alpha.3", "version without v")
+	version := flag.String("version", "0.2.0-alpha.4", "version without v")
 	targetOS := flag.String("os", runtime.GOOS, "target operating system")
 	targetArch := flag.String("arch", runtime.GOARCH, "target architecture")
 	flag.Parse()
@@ -177,6 +177,7 @@ func buildMenubar(stage, arch, version string) {
 	plist, err := os.ReadFile("macos/AvatarTHU/Info.plist")
 	must(err)
 	must(os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(strings.ReplaceAll(string(plist), "VERSION", strings.SplitN(version, "-", 2)[0])), 0644))
+	copyFile("macos/AvatarTHU/Resources/TsinghuaSeal.svg", filepath.Join(app, "Contents", "Resources", "TsinghuaSeal.svg"))
 	cmd = exec.Command("codesign", "--force", "--sign", "-", app)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	must(cmd.Run())

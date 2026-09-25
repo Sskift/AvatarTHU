@@ -10,6 +10,58 @@ func readObject(_ url: URL) -> Object {
     return value
 }
 
+func readObjects(_ url: URL) -> [Object] {
+    guard let data = try? Data(contentsOf: url),
+          let value = try? JSONSerialization.jsonObject(with: data) as? [Object] else { return [] }
+    return value
+}
+
+struct Indicator {
+    var state: String
+    var text: String
+    var detail: String = ""
+
+    var color: NSColor {
+        switch state {
+        case "ready": return .systemGreen
+        case "error": return .systemRed
+        case "off": return .secondaryLabelColor
+        default: return .systemOrange
+        }
+    }
+
+    static func cli(_ tool: String, records: [Object], now: Date) -> Indicator {
+        guard let record = records.first(where: { $0["tool"] as? String == tool }),
+              let checked = dateValue(record["checked_at"]) else {
+            return Indicator(state: "unknown", text: "尚未检查")
+        }
+        let detail = [record["reason"] as? String, record["action"] as? String,
+                      record["version"] as? String].compactMap { $0 }.joined(separator: "\n")
+        guard (-60...600).contains(now.timeIntervalSince(checked)) else {
+            return Indicator(state: "stale", text: "检查记录待更新", detail: detail)
+        }
+        if record["usable"] as? Bool == true {
+            return Indicator(state: "ready", text: "本地检查通过", detail: detail)
+        }
+        let reason = record["reason"] as? String ?? "检查失败"
+        let text: String
+        if reason.contains("未找到") { text = "未安装 / 路径无效" }
+        else if reason.contains("登录") || reason.contains("授权") { text = "需要登录" }
+        else if reason.contains("版本") { text = "需要更新 CLI" }
+        else { text = "检查失败" }
+        return Indicator(state: "error", text: text, detail: detail)
+    }
+}
+
+func sealImage() -> NSImage? {
+    guard let url = Bundle.main.url(forResource: "TsinghuaSeal", withExtension: "svg"),
+          let image = NSImage(contentsOf: url) else { return nil }
+    image.size = NSSize(width: 19, height: 19)
+    image.isTemplate = true
+    image.accessibilityDescription = "清华大学校徽 · AvatarTHU"
+    return image
+}
+
 func dateValue(_ value: Any?) -> Date? {
     guard let text = value as? String else { return nil }
     let format = ISO8601DateFormatter()
@@ -47,12 +99,17 @@ struct Snapshot {
     var pid: Int32 = 0
     var school = "尚未检查"
     var schoolOK = false
+    var learn = Indicator(state: "unknown", text: "尚未检查")
     var lastSuccess: Date?
     var pollSeconds: Double = 43200
     var nextScan: Date?
     var lark = false
     var actions = false
     var messages = false
+    var larkCLI = Indicator(state: "off", text: "未启用 · 本地审阅")
+    var claude = Indicator(state: "unknown", text: "尚未检查")
+    var codex = Indicator(state: "unknown", text: "尚未检查")
+    var cliCheckedAt: Date?
     var busy = 0
     var queued = 0
     var awaiting = 0
@@ -62,7 +119,7 @@ struct Snapshot {
 
     var kind: String {
         if !running { return "stopped" }
-        if !schoolOK || attention > 0 || (lark && (!actions || !messages)) { return "attention" }
+        if !schoolOK || attention > 0 || (lark && (!actions || !messages)) || claude.state == "error" || codex.state == "error" { return "attention" }
         return busy > 0 ? "busy" : "running"
     }
     var headline: String {
@@ -92,6 +149,13 @@ struct Snapshot {
         case "unavailable": s.school = "暂时无法连接"
         default: break
         }
+        let learnState = s.schoolOK ? "ready" : (["expired", "unavailable"].contains(keepalive["state"] as? String ?? "") ? "error" : "unknown")
+        s.learn = Indicator(state: learnState, text: s.school, detail: "网络学堂登录及保活状态，每 10 分钟检查。")
+        let cliRecords = readObjects(root.appendingPathComponent("data/cli-health.json"))
+        s.claude = Indicator.cli("claude", records: cliRecords, now: now)
+        s.codex = Indicator.cli("codex", records: cliRecords, now: now)
+        let cliDates = ["claude", "codex"].compactMap { tool in dateValue(cliRecords.first { $0["tool"] as? String == tool }?["checked_at"]) }
+        if cliDates.count == 2 { s.cliCheckedAt = cliDates.min() }
         s.pollSeconds = (config["poll_interval_seconds"] as? Double) ?? 43200
         let schedule = readObject(root.appendingPathComponent("data/schedule.json"))
         s.nextScan = dateValue(schedule["next_sync_retry_at"]) ?? dateValue(schedule["last_sync_at"]).map { $0.addingTimeInterval(s.pollSeconds) }
@@ -102,6 +166,16 @@ struct Snapshot {
         }
         s.actions = listener("actions")
         s.messages = listener("messages")
+        if s.lark {
+            if s.actions && s.messages {
+                s.larkCLI = Indicator(state: "ready", text: "卡片 / 消息已连接")
+            } else if !s.running {
+                s.larkCLI = Indicator(state: "off", text: "后台已停止 · 连接已停")
+            } else {
+                s.larkCLI = Indicator(state: "unknown", text: s.actions || s.messages ? "部分连接中断" : "等待连接 / 重连")
+            }
+            s.larkCLI.detail = "飞书卡片回调：\(s.actions ? "已连接" : "未连接")\n消息监听：\(s.messages ? "已连接" : "未连接")"
+        }
         let taskURLs = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("data/tasks"), includingPropertiesForKeys: nil)) ?? []
         for url in taskURLs where url.pathExtension == "json" {
             let task = readObject(url)
@@ -122,6 +196,7 @@ struct Snapshot {
         return ["state": kind, "daemon_running": running, "pid": pid, "school": school,
                 "school_valid": schoolOK, "poll_interval_seconds": pollSeconds,
                 "lark_enabled": lark, "actions_ready": actions, "messages_ready": messages,
+                "indicators": ["lark_cli": larkCLI.state, "learn": learn.state, "claude": claude.state, "codex": codex.state],
                 "working": busy, "queued": queued, "awaiting": awaiting, "attention": attention]
     }
 }
@@ -138,6 +213,10 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var detailWindow: NSWindow?
     var detailText: NSTextView?
     var activeProcess: Process?
+    var cliProbe: Process?
+    var lastCLIProbe: Date?
+    var cliProbeError: String?
+    var indicatorViews: [String: (dot: NSView, label: NSTextField, view: NSView)] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let locks = root.appendingPathComponent("data/locks")
@@ -158,6 +237,8 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.menu = menu
         item.button?.font = .systemFont(ofSize: 12, weight: .medium)
         item.button?.setAccessibilityLabel("AvatarTHU 常驻状态")
+        item.button?.image = sealImage()
+        item.button?.imagePosition = .imageLeading
         refresh()
         timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
         timer?.tolerance = 3
@@ -176,6 +257,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         timer?.invalidate()
         activeProcess?.terminate()
+        cliProbe?.terminate()
         if ownsLock { writeHealth("stopped") }
         if lockFD >= 0 { close(lockFD) }
     }
@@ -190,25 +272,94 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func refresh() {
         snapshot = Snapshot.load(root: root)
-        let symbol: String
-        let color: NSColor
-        switch snapshot.kind {
-        case "stopped": symbol = "pause.circle"; color = .secondaryLabelColor
-        case "attention": symbol = "exclamationmark.circle.fill"; color = .systemOrange
-        case "busy": symbol = "arrow.triangle.2.circlepath.circle.fill"; color = .systemBlue
-        default: symbol = "checkmark.circle.fill"; color = .systemGreen
+        checkCLIsIfNeeded()
+        if let error = cliProbeError {
+            snapshot.claude = Indicator(state: "error", text: "检查未完成", detail: error)
+            snapshot.codex = snapshot.claude
+        } else if cliProbe != nil {
+            if snapshot.claude.state != "ready" { snapshot.claude = Indicator(state: "checking", text: "正在检查…") }
+            if snapshot.codex.state != "ready" { snapshot.codex = Indicator(state: "checking", text: "正在检查…") }
         }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: snapshot.headline)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [color]))
-        image?.isTemplate = false
-        item.button?.image = image
-        item.button?.imagePosition = .imageLeading
-        item.button?.title = snapshot.awaiting > 0 ? " THU \(snapshot.awaiting)" : " THU"
+        let fallback = item.button?.image == nil ? "THU" : ""
+        item.button?.title = fallback + (snapshot.awaiting > 0 ? " \(snapshot.awaiting)" : "")
         item.button?.toolTip = "AvatarTHU · \(snapshot.headline)\n网络学堂：\(snapshot.school)\n待审阅 \(snapshot.awaiting) · 需处理 \(snapshot.attention)"
+        for (title, indicator) in [("Lark CLI", snapshot.larkCLI), ("Learn · 网络学堂", snapshot.learn), ("Claude", snapshot.claude), ("Codex", snapshot.codex)] {
+            guard let views = indicatorViews[title] else { continue }
+            views.dot.layer?.backgroundColor = indicator.color.cgColor
+            views.label.stringValue = indicator.text
+            views.view.toolTip = indicator.detail
+            views.view.setAccessibilityLabel("\(title)：\(indicator.text)")
+        }
         writeHealth("running")
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) { refresh(); rebuild() }
+
+    // Only local version/auth/help commands; never launch an inference request.
+    // Cache across refreshes and app launches, and keep the menu responsive.
+    func checkCLIsIfNeeded(force: Bool = false) {
+        guard cliProbe == nil else { return }
+        let now = Date()
+        if !force, [lastCLIProbe, snapshot.cliCheckedAt].compactMap({ $0 }).contains(where: { (0..<300).contains(now.timeIntervalSince($0)) }) { return }
+        lastCLIProbe = now
+        cliProbeError = nil
+        let process = Process()
+        process.executableURL = root.appendingPathComponent("bin/avatarthu")
+        process.arguments = ["doctor"]
+        process.currentDirectoryURL = root
+        var env = ProcessInfo.processInfo.environment
+        env["AVATARTHU_HOME"] = root.path
+        process.environment = env
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] completed in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.cliProbe = nil
+                let records = readObjects(self.root.appendingPathComponent("data/cli-health.json"))
+                let completedCheck = ["claude", "codex"].allSatisfy { tool in
+                    guard let checked = dateValue(records.first { $0["tool"] as? String == tool }?["checked_at"]) else { return false }
+                    return checked >= now.addingTimeInterval(-1)
+                }
+                if !completedCheck { self.cliProbeError = "检查未完成（退出码 \(completed.terminationStatus)）；可运行 avatarthu doctor 查看原因。" }
+                self.refresh()
+            }
+        }
+        do {
+            try process.run()
+            cliProbe = process
+        } catch {
+            cliProbeError = "无法运行 avatarthu doctor：\(error.localizedDescription)"
+        }
+    }
+
+    @objc func refreshStatus() { checkCLIsIfNeeded(force: true); refresh() }
+
+    func indicatorRow(_ title: String, _ indicator: Indicator) {
+        let entry = NSMenuItem(title: "\(title)：\(indicator.text)", action: nil, keyEquivalent: "")
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 27))
+        let dot = NSView(frame: NSRect(x: 16, y: 9, width: 8, height: 8))
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 4
+        dot.layer?.backgroundColor = indicator.color.cgColor
+        let name = NSTextField(labelWithString: title)
+        name.font = .systemFont(ofSize: 12, weight: .medium)
+        name.frame = NSRect(x: 36, y: 5, width: 115, height: 18)
+        let status = NSTextField(labelWithString: indicator.text)
+        status.font = .systemFont(ofSize: 12)
+        status.textColor = .secondaryLabelColor
+        status.alignment = .right
+        status.frame = NSRect(x: 154, y: 5, width: 190, height: 18)
+        view.addSubview(dot); view.addSubview(name); view.addSubview(status)
+        view.toolTip = indicator.detail.isEmpty ? entry.title : indicator.detail
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(.staticText)
+        view.setAccessibilityLabel(entry.title)
+        entry.view = view
+        indicatorViews[title] = (dot, status, view)
+        menu.addItem(entry)
+    }
 
     @discardableResult func row(_ title: String, action: Selector? = nil, symbol: String? = nil, to targetMenu: NSMenu? = nil) -> NSMenuItem {
         let result = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -245,18 +396,21 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func rebuild() {
         menu.removeAllItems()
+        indicatorViews.removeAll()
         let heading = row("AvatarTHU")
         heading.attributedTitle = NSAttributedString(string: "AvatarTHU", attributes: [.font: NSFont.systemFont(ofSize: 15, weight: .semibold), .foregroundColor: NSColor.labelColor])
         row(snapshot.headline + (snapshot.running ? " · PID \(snapshot.pid)" : ""))
-        row("网络学堂 · \(snapshot.school)", symbol: "graduationcap")
+        menu.addItem(.separator())
+        indicatorRow("Lark CLI", snapshot.larkCLI)
+        indicatorRow("Learn · 网络学堂", snapshot.learn)
+        indicatorRow("Claude", snapshot.claude)
+        indicatorRow("Codex", snapshot.codex)
+        menu.addItem(.separator())
         row("最近保活 · \(timeText(snapshot.lastSuccess))（每 10 分钟）")
         let interval = snapshot.pollSeconds >= 3600 ? String(format: "%g 小时", snapshot.pollSeconds / 3600) : String(format: "%g 分钟", snapshot.pollSeconds / 60)
         row("课程扫描 · 每 \(interval)")
         let next = snapshot.nextScan.map { $0 <= Date() ? "已到期，等待调度" : timeText($0) } ?? "首次启动时扫描"
         row("下次扫描 · \(snapshot.running ? next : "恢复后台后检查")")
-        if snapshot.lark {
-            row("飞书 · 卡片\(snapshot.actions ? "已连接" : "未连接") / 消息\(snapshot.messages ? "已连接" : "未连接")", symbol: "bubble.left.and.bubble.right")
-        } else { row("飞书 · 未启用（本地审阅）", symbol: "bubble.left") }
         menu.addItem(.separator())
         row("作业 · \(snapshot.busy) 处理中 / \(snapshot.queued) 排队 / \(snapshot.awaiting) 待审阅 / \(snapshot.attention) 需处理")
         if !snapshot.reviews.isEmpty {
@@ -281,7 +435,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         row(snapshot.running ? "停止后台" : "启动后台", action: #selector(toggleService), symbol: snapshot.running ? "stop.circle" : "play.circle")
         row("立即检查登录与保活", action: #selector(keepalive), symbol: "arrow.clockwise")
         row("重新登录网络学堂…", action: #selector(login), symbol: "person.badge.key")
-        row("刷新状态", action: #selector(refresh), symbol: "arrow.triangle.2.circlepath")
+        row("刷新状态与 CLI 检查", action: #selector(refreshStatus), symbol: "arrow.triangle.2.circlepath")
         menu.addItem(.separator())
         let quit = row("退出菜单栏（后台继续运行）", action: #selector(quitApp), symbol: "xmark.circle")
         quit.isEnabled = !busyAction

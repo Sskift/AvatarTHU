@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.2.0-alpha.3"; fi
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.2.0-alpha.4"; fi
           go run ./cmd/release --os '${{ matrix.os }}' --arch '${{ matrix.arch }}' --version "$version" --out dist
       - uses: actions/upload-artifact@v4
         with:

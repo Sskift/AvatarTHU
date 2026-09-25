@@ -11,6 +11,7 @@ AvatarTHU is an independent Go implementation. It does not invoke or bundle a Py
 - `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/image`: HTML, cookie domain validation, Windows process support, and image decoding, BSD-3-Clause.
 - Feishu optionally invokes the official [Lark CLI](https://github.com/larksuite/cli). Its binary/source is not bundled. An existing installation is reused, or `@larksuite/cli@1.0.96` is installed through npm into the user's data directory when Feishu is enabled.
 - Claude Code and Codex CLI remain separately installed tools with their own licenses, accounts and model settings. They are not bundled.
+- The macOS menu bar's `TsinghuaSeal.svg` comes from [Tsinghua University Logo on Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tsinghua_University_Logo.svg), attributed there to Tsinghua University and marked public domain (PD-China and PD-1996). The unused SVG pattern was removed; AppKit renders the seal as a monochrome template. The university emblem remains Tsinghua University's mark; AvatarTHU is an independent project, not an official university application.
 - Network API fields were also cross-checked against [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib). No TypeScript implementation is bundled.
 - Card 2.0 follows the official Lark CLI documentation. Historical layout inspiration: [Feishu-card-strong](https://github.com/TWe1v3/Feishu-card-strong); no third-party card skill is executed or bundled.
 

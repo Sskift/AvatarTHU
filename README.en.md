@@ -235,9 +235,9 @@ avatarthu keepalive status
 
 ## macOS menu bar monitor
 
-Starting with `v0.2.0-alpha.2`, macOS archives include a native AppKit menu bar app. Once initialization installs it, `avatarthu service start` also displays **THU** in the menu bar. The number next to it counts assignments awaiting review. It does not occupy the Dock or require an open terminal.
+macOS archives include a native AppKit menu bar app. Once initialization installs it, `avatarthu service start` displays a **miniature university seal** that adapts to light and dark menu bars. The number next to it counts assignments awaiting review. There is no status dot in the menu bar, Dock icon, or need for an open terminal.
 
-1. **Check status:** green means normal operation, blue means an assignment is being processed, orange means authentication, connections, or tasks need attention, and gray means the daemon is stopped. The menu shows the last keepalive, next scan, Feishu card/message connections, and task counts.
+1. **Check status:** the menu has separate labeled indicators for **Lark CLI, Learn (Web Learning), Claude, and Codex**. Green means checks passed, red means an error, orange means a pending check, connection, or stale record, and gray means disabled or stopped connections. Daemon state, last keepalive, next scan, and task counts appear separately.
 2. **Open deliverables:** use “打开审阅文档” (Open review document) to open an existing cloud document or local review page. Course folders, logs, and a detailed status window are also available.
 3. **Resolve issues:** start or stop the daemon, check keepalive immediately, or sign in to Web Learning again. The monitor has no submission action; submission still requires your confirmation on the current revision's card.
 4. **Control it separately:** quitting the menu bar app leaves the daemon running and the monitor returns at the next system login. `service stop` stops the course loop while leaving the monitor visible with a stopped status.
@@ -248,7 +248,7 @@ avatarthu menubar status          # Check installation and process status
 avatarthu menubar stop            # Disable the monitor and its autostart; keep the daemon
 ```
 
-The monitor reads local state every 15 seconds and refreshes when opened. It does not poll the school or start models. It checks that the daemon PID belongs to the expected executable, so stale state cannot alone indicate a running daemon. Keepalive records older than 15 minutes show as pending refresh. Course polling and 10-minute keepalive still run in the same Go process.
+The monitor reads local state every 15 seconds and refreshes when opened. Local Claude/Codex version, authentication, and command compatibility checks run at most once every 5 minutes; “刷新状态与 CLI 检查” refreshes them immediately. Hover over an indicator for details. Green confirms local checks passed; quota and network availability are determined during actual assignment execution. The monitor sends no model requests and does not separately poll the school. It verifies that the daemon PID belongs to the expected executable. Keepalive records older than 15 minutes and CLI checks older than 10 minutes show as pending refresh. Course polling and 10-minute keepalive still run in the same Go process.
 
 To upgrade, download the complete macOS archive, run `./avatarthu init --no-login --no-start` from the extracted directory, then `avatarthu menubar start`. Existing courses, accounts, and assignments are preserved. A CLI built with only `go build ./cmd/avatarthu` does not contain the monitor. Build a complete macOS archive on a Mac with `go run ./cmd/release --os darwin --arch arm64 --out dist`, or use `--arch amd64` for Intel. Only developers building the monitor need Xcode Command Line Tools.
 
