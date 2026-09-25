@@ -8,6 +8,8 @@
 
 [下载最新版本](https://github.com/Sskift/AvatarTHU/releases) · [反馈问题](https://github.com/Sskift/AvatarTHU/issues) · [来源与许可证](THIRD_PARTY.md)
 
+[从零开始安装](#quickstart) · [复制给 Agent 自动配置](#agent-setup)
+
 ## 使用效果
 
 下图使用**虚构的演示作业与复审记录**，不代表真实作业完成或模型复审结果。卡片是程序生成的 JSON 的本地渲染预览，云文档是实际飞书正文截图。截图仅保留产品内容，不包含姓名、头像、学号、账号、私人链接或真实课程资料。详见[截图说明](docs/images/README.md)。
@@ -42,36 +44,147 @@
 
 </details>
 
-## 安装与启动
+<a id="quickstart"></a>
 
-从 [Releases](https://github.com/Sskift/AvatarTHU/releases) 下载对应系统与架构的文件，解压后执行一次初始化。压缩包只有原生程序、说明与许可证，没有解释器环境。
+## 从零开始：第一次运行
 
-macOS / Linux：
+首次使用按下面六步完成。**不需要克隆仓库或安装 Go、Python。** 需要本人的网络学堂账号，以及已安装并登录的 Claude Code 和 Codex CLI；首次网络学堂登录需要 Chrome，Windows 也支持 Edge。飞书可选，不影响本地工作流。也可以直接使用下方的 [Agent 配置提示词](#agent-setup)。
+
+### 1. 下载适合自己电脑的程序
+
+打开 [Releases](https://github.com/Sskift/AvatarTHU/releases)，选择最新可用版本并展开 Assets；目前提供 Alpha 预发布版本。
+
+| 电脑 | 下载文件 |
+| --- | --- |
+| macOS · Apple 芯片 | `avatarthu-darwin-arm64.tar.gz` |
+| macOS · Intel | `avatarthu-darwin-amd64.tar.gz` |
+| Windows · Intel / AMD 64 位 | `avatarthu-windows-amd64.zip` |
+| Windows · ARM64 | `avatarthu-windows-arm64.zip` |
+| Linux · x86_64 | `avatarthu-linux-amd64.tar.gz` |
+| Linux · ARM64 / aarch64 | `avatarthu-linux-arm64.tar.gz` |
+
+macOS / Linux 可用 `uname -m` 查看架构；Windows 可在“设置 → 系统 → 系统信息”查看系统类型。下载同一版本的 `SHA256SUMS`，用 `shasum -a 256 文件名`（macOS）、`sha256sum 文件名`（Linux）或 `Get-FileHash 文件名 -Algorithm SHA256`（PowerShell）与其中对应文件的值核对，然后解压。
+
+### 2. 安装命令，暂不启动后台
+
+在解压目录打开终端。macOS / Linux：
 
 ```sh
 chmod +x avatarthu
-./avatarthu init
+./avatarthu init --no-login --no-start
 ```
 
 Windows PowerShell：
 
 ```powershell
-.\avatarthu.exe init
+.\avatarthu.exe init --no-login --no-start
 ```
 
 初始化把程序安装到用户目录并配置命令入口，随后在新终端中直接使用 `avatarthu`。Windows 若新终端尚未刷新用户 PATH，可以重新登录系统；安装命令打印的完整路径也可以直接使用。macOS 首次打开下载程序时若被系统拦截，可在“系统设置 → 隐私与安全性”允许打开。当前预发布二进制尚未做 Apple 公证或 Windows 代码签名。
 
-初始化默认打开网络学堂登录入口并启动后台。也可分开执行：
+新开终端后检查：
 
 ```sh
-avatarthu init --no-login --no-start
-avatarthu tools
-avatarthu login thu
-avatarthu doctor
-avatarthu service start
+avatarthu --version
 ```
 
+这一步只安装和初始化。直接运行不带参数的 `init` 会登录并启动后台，适合工具与配置已就绪的使用者。
+
+### 3. 准备主写和复审工具
+
+两种 CLI 都需要安装和登录，即使你正在其中一个 Agent 里完成配置。已有可用安装可直接复用；缺少时运行 `avatarthu tools` 查看安装方法，也可参照后面的[工具说明](#必需和可选工具)。分别运行 `claude`、`codex` 完成登录后退出交互会话，再检查：
+
+```sh
+avatarthu tools
+avatarthu doctor
+```
+
+预期两个 CLI 都显示“可启动，登录检查通过”。这不代表已验证实时额度或完成了作业；实际写作与复审会使用你自己的 CLI 账号和额度。工具未就绪时仍可只同步材料，先不执行第 6 步。
+
+### 4. 选择分工，登录网络学堂
+
+```sh
+avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3
+avatarthu login thu
+avatarthu keepalive run
+```
+
+这里选择 Claude 主写、Codex 复审；交换分工可把 `claude-codex` 改为 `codex-claude`。`12h` 可换成 `30m`、`6h` 或 `1d`；保活固定每 10 分钟。两边沿用各自默认模型。
+
 `login thu` 在 macOS 优先复用 Chrome 中已有的网络学堂登录；不可用时打开 AvatarTHU 自己的浏览器窗口，由本人完成 SSO / 双因素认证。Windows 使用 Chrome 或 Edge。不依赖 Selenium、ChromeDriver 或外部 AutoThu 程序。
+
+`keepalive run` 返回的 `state` 应为 `valid`，表示学校会话可用。
+
+### 5. 选择是否接入飞书，完成首次同步
+
+**只在本地使用：** 全新安装默认关闭飞书，直接执行下方同步命令即可。已有配置需要关闭飞书时，运行 `avatarthu notifications off`。
+
+**需要飞书卡片和云文档：** 先执行以下命令，按引导完成应用配置和本人授权。缺少 Lark CLI 时可通过本机 npm 安装；未准备 Node.js/npm 的使用者也可先使用纯本地模式。
+
+```sh
+avatarthu login lark --no-start
+```
+
+此处的 `--no-start` 用于先完成配置；不带它会直接启动后台。随后执行首次同步：
+
+```sh
+avatarthu run --sync-only
+avatarthu status
+```
+
+预期显示“同步完成”，课程材料出现在 `~/.avatarthu/courses/`，发现的待交作业显示为 `queued`。没有待交作业时列表为空也是正常的。这一步会下载材料，**不会启动主写或复审**；启用飞书时会推送未读公告，并在保存成功回执后标为已读。
+
+### 6. 启动常驻进程，查看第一份产物
+
+```sh
+avatarthu service start
+avatarthu status
+avatarthu keepalive status
+```
+
+后台会开始处理已发现的待交作业，**不需要等 12 小时**；12 小时是后续课程扫描间隔。首次使用会处理当前扫描发现的全部符合条件的待交作业。若只想先试一份，暂不启动后台，用 `avatarthu run --task 作业编号` 在前台处理；编号可从 `status` 获取。
+
+初次启动后再次运行 `status`：调度进程应为 `running`，网络学堂应为 `valid`；如启用飞书，`actions`、`messages` 连接应为 `ready`。复审通过后作业进入 `awaiting`，可从 `status` 打开本地审阅页，或在飞书收到卡片并打开云文档。需要本人补充时会显示 `needs_student`，执行失败时显示 `failed` 及原因。没有新作业时不会凭空生成审阅卡片。
+
+看到后台运行后可以关闭终端，也可以退出负责安装的 Agent。系统服务会在用户登录后自动启动；电脑休眠期间暂停，唤醒后补查。只有本人对当前版本的卡片确认提交才会上传作业；本地模式需本人在学校网页提交。
+
+| 首次运行遇到的问题 | 处理方式 |
+| --- | --- |
+| 找不到 `avatarthu` 命令 | 新开终端，或使用初始化打印的完整路径；不要重复安装语言运行时。 |
+| `doctor` 检查未通过 | 按对应 CLI 的提示处理安装、登录或版本问题，再运行 `doctor`。 |
+| 学校会话不是 `valid` | 运行 `avatarthu login thu` 完成本人认证，再运行 `avatarthu keepalive run`。 |
+| 服务已注册，但没有运行或任务报错 | 查看 `avatarthu status` 和 `~/.avatarthu/logs/daemon.log`。Linux 后台依赖可用的 systemd 用户服务；没有时可用 `avatarthu daemon` 前台运行，关闭终端后会停止。 |
+| 飞书连接未就绪 | 查看日志中的权限、授权或网络错误，再运行 `avatarthu login lark`；`ready` 表示监听连接就绪，实际收发以收到卡片和修改反馈为准。 |
+
+<a id="agent-setup"></a>
+
+## 复制给 Agent 自动配置
+
+把下面整段复制给能操作本机终端的 Agent，例如 Claude Code 或 Codex。代码块右上角可一键复制；可先修改前三项偏好。Agent 可以完成下载安装、检查、配置和后台启动，**学校登录、扫码、双因素认证及系统授权仍由你本人完成**。
+
+```text
+请在这台电脑上安装并配置 AvatarTHU，实际执行配置，不要只给教程。
+项目：https://github.com/Sskift/AvatarTHU
+先阅读仓库当前 README.md（英文可读 README.en.md），以实际版本的命令和帮助为准。
+
+我的偏好（仅首次安装时作为默认；已有配置先保留）：
+- 分工：claude-codex（Claude 主写，Codex 复审；也可改为 codex-claude）
+- 课程扫描：12h；每版最多复审 3 轮；保活使用内置 10 分钟间隔
+- 飞书：关闭（可改为开启，向我本人发送卡片和云文档）
+
+请按顺序完成：
+1. 检查操作系统、CPU 架构、已有 avatarthu、Claude Code、Codex CLI、浏览器和可选 Lark CLI。保留已有数据、登录和默认模型，不覆盖已有作业或账号配置；已有安装只补齐缺项。若已有后台在运行，报告状态并跳过首次安装、同步与启动。
+2. 如未安装 AvatarTHU，从本项目 GitHub Releases 选择最新可用的非草稿版本，包括预发布版。选择匹配系统与架构的压缩包，用同版本 SHA256SUMS 校验后解压。不要依赖 /releases/latest 一定存在，不要从第三方下载，也不要为运行 AvatarTHU 安装 Python、Go 或克隆源码编译。
+3. 使用解压后的程序执行 init --no-login --no-start。检查 avatarthu --version；当前终端 PATH 未刷新时使用安装输出的完整路径继续。数据统一通过 ~/.avatarthu 访问，Windows 使用 %USERPROFILE%\.avatarthu；不要放进仓库。
+4. 运行 avatarthu tools。复用已有 Claude Code 和 Codex CLI，缺失时按各自官方方式安装。引导我在各 CLI 中完成登录，再运行 avatarthu doctor；两种工具都要可用。沿用各 CLI 默认模型，不修改或比较模型。不要把工具安装成功说成作业已经验证正确。
+5. 全新安装按上述偏好执行 avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3（若我修改了偏好，相应调整参数）；已有配置保留原分工和间隔，除非我明确要求更改。运行 avatarthu login thu，再运行 avatarthu keepalive run，确认 state=valid。密码、验证码和扫码由我在官方登录界面完成，不要要求我把凭据贴进聊天。
+6. 若选择飞书，执行 avatarthu login lark --no-start，复用现有登录或引导我完成应用配置与授权；缺少可选依赖时明确说明。若选择本地模式，全新安装保持飞书关闭；不要擅自修改已有飞书绑定。
+7. 后台尚未运行时，执行 avatarthu run --sync-only，再用 avatarthu status 检查课程和作业列表。此步骤不启动写作或复审；启用飞书会推送未读公告并在成功后标已读。不要做真实作业提交测试。
+8. 两种模型 CLI 和学校登录就绪后，执行 avatarthu service start 并检查 avatarthu status、avatarthu keepalive status。确认调度进程 running、学校会话 valid；选择飞书时还应检查 actions/messages 是否 ready。后台将处理已发现的待交作业并使用我的 CLI 额度；以后按设定间隔扫描，无需负责安装的 Agent 一直在线。
+9. 汇报实际版本、安装和数据路径、主写/复审分工、扫描/保活间隔、飞书是否启用、后台状态、已有审阅入口及停止命令 avatarthu service stop。任何步骤受阻，都说明具体原因和下一条操作，不把未完成项说成已完成；缺少工具时可停在仅同步阶段。
+
+提交作业必须等待我本人对当前版本的卡片操作；不要点击提交按钮或模拟回调。保留每轮独立复审意见，不用虚构结果展示配置成功。不要输出 Cookie、token、应用密钥或个人课程内容。
+```
 
 ## 必需和可选工具
 

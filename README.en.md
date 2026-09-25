@@ -8,6 +8,8 @@ A local assistant that connects Tsinghua Web Learning course materials, assignme
 
 [Download a release](https://github.com/Sskift/AvatarTHU/releases) · [Report an issue](https://github.com/Sskift/AvatarTHU/issues) · [Attribution and licenses](THIRD_PARTY.md)
 
+[First-time setup](#quickstart) · [Copy a setup prompt for your agent](#agent-setup)
+
 ## See it in action
 
 These screenshots use a **fictional assignment and fictional review records**. They are not evidence of a completed assignment or a real model review. The card is a local rendering of the application's generated JSON; the document images capture actual Feishu document content. Only product content is shown: no personal names, avatars, student IDs, accounts, private links, or real course materials. See the [screenshot notes](docs/images/README.md).
@@ -44,36 +46,147 @@ Native attachments can be previewed or downloaded. The document ends with each r
 
 </details>
 
-## Install and start
+<a id="quickstart"></a>
 
-Download the archive for your operating system and architecture from [Releases](https://github.com/Sskift/AvatarTHU/releases), extract it, and initialize once. The archive contains the native executable, documentation, and licenses, without a bundled interpreter.
+## First-time setup: from download to background operation
 
-macOS / Linux:
+Follow these six steps on a new machine. **You do not need to clone the repository or install Go or Python.** You need your own Web Learning account and both Claude Code and Codex CLI installed and signed in. Initial school login requires Chrome; Windows also supports Edge. Feishu is optional. You can also use the [agent setup prompt](#agent-setup) below.
+
+### 1. Download the right executable
+
+Open [Releases](https://github.com/Sskift/AvatarTHU/releases), choose the newest available release, and expand Assets. Current releases are Alpha prereleases.
+
+| Computer | Archive |
+| --- | --- |
+| macOS · Apple silicon | `avatarthu-darwin-arm64.tar.gz` |
+| macOS · Intel | `avatarthu-darwin-amd64.tar.gz` |
+| Windows · Intel / AMD 64-bit | `avatarthu-windows-amd64.zip` |
+| Windows · ARM64 | `avatarthu-windows-arm64.zip` |
+| Linux · x86_64 | `avatarthu-linux-amd64.tar.gz` |
+| Linux · ARM64 / aarch64 | `avatarthu-linux-arm64.tar.gz` |
+
+Use `uname -m` on macOS / Linux, or check **Settings → System → About** on Windows, to identify your architecture. Download `SHA256SUMS` from the same release. Compare the matching entry with `shasum -a 256 FILENAME` on macOS, `sha256sum FILENAME` on Linux, or `Get-FileHash FILENAME -Algorithm SHA256` in PowerShell, then extract the archive.
+
+### 2. Install the command without starting the service
+
+Open a terminal in the extracted directory. On macOS / Linux:
 
 ```sh
 chmod +x avatarthu
-./avatarthu init
+./avatarthu init --no-login --no-start
 ```
 
 Windows PowerShell:
 
 ```powershell
-.\avatarthu.exe init
+.\avatarthu.exe init --no-login --no-start
 ```
 
 Initialization installs the executable in your user directory and configures the command entry point. Open a new terminal, then use `avatarthu` directly. If a new Windows terminal has not picked up the updated user PATH, sign out and back in, or use the full path printed by the installer. If macOS blocks the downloaded executable, allow it in **System Settings → Privacy & Security**. The current prerelease is not Apple-notarized or Windows code-signed.
 
-By default, initialization opens the Web Learning login flow and starts the background service. You can also perform the steps separately:
+In a new terminal, check:
 
 ```sh
-avatarthu init --no-login --no-start
-avatarthu tools
-avatarthu login thu
-avatarthu doctor
-avatarthu service start
+avatarthu --version
 ```
 
+This step only installs and initializes the application. Running `init` without flags also signs in and starts the service, which is useful when your tools and configuration are already ready.
+
+### 3. Prepare the writer and reviewer CLIs
+
+Both CLIs must be installed and signed in, even if you are using one of them to perform this setup. Reuse working installations. Run `avatarthu tools` for installation instructions, or see [Required and optional tools](#required-and-optional-tools). Run `claude` and `codex` separately to complete authentication, exit their interactive sessions, and check:
+
+```sh
+avatarthu tools
+avatarthu doctor
+```
+
+Both CLIs should report “可启动，登录检查通过” (launch and authentication checks passed). This does not validate live quota or complete an assignment. Writing and review use your own CLI accounts and quota. You can still synchronize materials while a CLI is unavailable; leave step 6 for later.
+
+### 4. Choose roles and sign in to Web Learning
+
+```sh
+avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3
+avatarthu login thu
+avatarthu keepalive run
+```
+
+This selects Claude as writer and Codex as reviewer. Use `codex-claude` to swap their roles. Replace `12h` with values such as `30m`, `6h`, or `1d`; keepalive remains every 10 minutes. Each CLI keeps its own default model.
+
 On macOS, `login thu` first tries the existing Web Learning session in Chrome. Otherwise, it opens a dedicated AvatarTHU browser window for you to complete SSO and any two-factor authentication. Windows supports Chrome and Edge. Selenium, ChromeDriver, and a separate AutoThu executable are not required.
+
+The `state` returned by `keepalive run` should be `valid`, confirming that the school session works.
+
+### 5. Choose optional Feishu integration and synchronize once
+
+**Local use only:** Feishu is disabled on a fresh installation. Proceed directly to synchronization. To disable it in an existing configuration, run `avatarthu notifications off`.
+
+**Feishu cards and cloud documents:** Run the following command and follow the application setup and account authorization flow. If Lark CLI is missing, the application can install it using a local npm installation. You can also start with local mode if Node.js/npm is not available.
+
+```sh
+avatarthu login lark --no-start
+```
+
+The `--no-start` flag lets you finish configuration first; omitting it starts the service immediately. Then synchronize:
+
+```sh
+avatarthu run --sync-only
+avatarthu status
+```
+
+Expect “同步完成” (synchronization complete), course materials under `~/.avatarthu/courses/`, and discovered assignments with status `queued`. An empty list is normal if there are no pending assignments. This step downloads materials and **does not start writing or review**. When Feishu is enabled, it also delivers unread announcements and marks them read after saving successful delivery receipts.
+
+### 6. Start the background service and find your first output
+
+```sh
+avatarthu service start
+avatarthu status
+avatarthu keepalive status
+```
+
+The service starts processing discovered assignments **without waiting 12 hours**; that interval controls subsequent course scans. On first use, all eligible pending assignments discovered by the scan are processed. To try just one first, leave the service stopped and use `avatarthu run --task TASK_ID` in the foreground. Find the task ID with `status`.
+
+Check `status` again after startup: the scheduler should be `running` and the school session `valid`. With Feishu enabled, the `actions` and `messages` connections should become `ready`. A review-approved assignment enters `awaiting`; open its local review page from `status`, or use its Feishu card to open the cloud document. Work needing your input shows `needs_student`; execution errors show `failed` and an explanation. No new assignments means no new assignment review cards.
+
+Once the service is running, you can close the terminal and the agent that installed it. The operating system starts the service when you sign in. Work pauses during sleep and overdue checks resume after wake. Uploading requires your action on the current revision's card; local mode requires manual submission through the school website.
+
+| First-run issue | What to do |
+| --- | --- |
+| `avatarthu` command not found | Open a new terminal or use the full path printed during initialization. No additional language runtime is needed. |
+| `doctor` fails | Follow the affected CLI's installation, authentication, or version guidance, then rerun `doctor`. |
+| School session is not `valid` | Complete `avatarthu login thu`, then run `avatarthu keepalive run`. |
+| Service is registered but not running, or a task fails | Check `avatarthu status` and `~/.avatarthu/logs/daemon.log`. Linux background operation requires a working systemd user service. Without one, use `avatarthu daemon` in the foreground; closing that terminal stops it. |
+| Feishu connections are not ready | Check logs for permission, authorization, or network errors, then run `avatarthu login lark`. `ready` indicates the listener is connected; actual delivery and callbacks are confirmed by cards and revision feedback. |
+
+<a id="agent-setup"></a>
+
+## Copy a setup prompt for your agent
+
+Copy this entire block to an agent with access to your local terminal, such as Claude Code or Codex. Use the code block's copy button, and optionally edit the three preferences first. The agent can download, install, check, configure, and start AvatarTHU. **You still complete school login, QR scans, two-factor authentication, and system authorization yourself.**
+
+```text
+Install and configure AvatarTHU on this computer. Perform the setup rather than only giving instructions.
+Project: https://github.com/Sskift/AvatarTHU
+First read the current README.en.md (or README.md in Chinese). Use commands supported by the installed version and its help output.
+
+My preferences (defaults for a fresh installation; preserve existing configuration):
+- Roles: claude-codex (Claude writes, Codex reviews; alternatively codex-claude)
+- Course polling: 12h; up to 3 review rounds per revision; built-in 10-minute keepalive
+- Feishu: disabled (change to enabled for cards and cloud documents sent to me)
+
+Complete these steps in order:
+1. Inspect the OS, CPU architecture, existing AvatarTHU, Claude Code, Codex CLI, browser, and optional Lark CLI. Preserve existing data, authentication, default models, assignments, and account bindings; only fill missing parts of an existing setup. If the service is already running, report its status and skip first-time installation, synchronization, and startup.
+2. If AvatarTHU is missing, select the newest available non-draft release from this project's GitHub Releases, including prereleases. Download the matching OS/architecture archive, verify it against SHA256SUMS from the same release, and extract it. Do not assume /releases/latest exists, use third-party downloads, or install Python/Go or build from source just to run AvatarTHU.
+3. Run the extracted executable with init --no-login --no-start. Check avatarthu --version; use the full installed path if this terminal's PATH has not refreshed. Access data through ~/.avatarthu, or %USERPROFILE%\.avatarthu on Windows. Keep runtime data outside the repository.
+4. Run avatarthu tools. Reuse existing Claude Code and Codex CLI installations, or install missing tools using their official instructions. Let me authenticate in each CLI, then run avatarthu doctor; both tools must work. Keep each CLI's default model without changing or comparing models. Do not describe successful tool installation as proof of assignment correctness.
+5. For a fresh installation, apply my preferences using avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3, adjusting the arguments if I changed the preferences. Preserve existing roles and intervals unless I explicitly request changes. Run avatarthu login thu, then avatarthu keepalive run, and confirm state=valid. I will enter passwords, verification codes, and QR confirmations in the official login interface; do not ask me to paste credentials into chat.
+6. If I selected Feishu, run avatarthu login lark --no-start. Reuse authentication or guide me through application setup and authorization, explaining any missing optional dependencies. For local mode on a fresh installation, leave Feishu disabled. Do not change existing Feishu account bindings without my instruction.
+7. While the service is stopped, run avatarthu run --sync-only, then inspect the course and task list with avatarthu status. This does not start writing or review. If Feishu is enabled, it delivers unread announcements and marks them read after successful delivery. Do not test real homework submission.
+8. Once both model CLIs and the school session are ready, run avatarthu service start and check avatarthu status and avatarthu keepalive status. Confirm scheduler=running and school session=valid; with Feishu enabled, also check actions/messages=ready. The service will process discovered assignments using my CLI quota, then scan at the configured interval. The setup agent does not need to stay open.
+9. Report the actual version, installation and data paths, writer/reviewer roles, polling and keepalive intervals, Feishu configuration, service status, any existing review links, and the stop command avatarthu service stop. For blocked steps, report the specific cause and next action without claiming completion. If tools are missing, stop at synchronization-only setup.
+
+Homework submission must wait for my action on the current revision's card. Do not press submit or simulate callbacks. Preserve all independent review comments and never fabricate results to demonstrate successful setup. Do not expose cookies, tokens, application secrets, or private course content.
+```
 
 ## Required and optional tools
 
