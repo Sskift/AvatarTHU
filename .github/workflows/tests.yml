@@ -15,6 +15,12 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: true
+      - name: Build native macOS menu bar
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos12.0" macos/AvatarTHU/main.swift -o "$RUNNER_TEMP/AvatarTHUMenuBar"
+          echo "AVATARTHU_MENUBAR_TEST_BINARY=$RUNNER_TEMP/AvatarTHUMenuBar" >> "$GITHUB_ENV"
       - run: go vet ./...
       - run: go test -race ./...
       - name: Build native executable
@@ -30,6 +36,19 @@ jobs:
           "$AVATARTHU_HOME/bin/avatarthu" --version
           "$AVATARTHU_HOME/bin/avatarthu" configure --poll-interval 12h --mode codex-claude
           test ! -d "$AVATARTHU_HOME/.venv"
+      - name: Check macOS release bundle and installation
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          arch="$(go env GOARCH)"
+          go run ./cmd/release --os darwin --arch "$arch" --out "$RUNNER_TEMP/avatar-release"
+          mkdir "$RUNNER_TEMP/avatar-extract"
+          tar -xzf "$RUNNER_TEMP/avatar-release/avatarthu-darwin-$arch.tar.gz" -C "$RUNNER_TEMP/avatar-extract"
+          export AVATARTHU_HOME="$RUNNER_TEMP/avatar-menu-clean"
+          "$RUNNER_TEMP/avatar-extract/avatarthu" init --no-login --no-start
+          "$RUNNER_TEMP/avatar-extract/avatarthu" init --no-login --no-start
+          codesign --verify --deep --strict "$AVATARTHU_HOME/apps/AvatarTHU.app"
+          "$AVATARTHU_HOME/apps/AvatarTHU.app/Contents/MacOS/AvatarTHUMenuBar" --home "$AVATARTHU_HOME" --snapshot
       - name: Clean installation without a runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

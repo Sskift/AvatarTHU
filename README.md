@@ -4,11 +4,13 @@
 
 把网络学堂的课程资料、作业处理和本人审阅串起来的本地课程助手。
 
-**现在使用 Go 原生程序。** 每个平台一个可执行文件，不需要安装 Python、pip、虚拟环境、Go 或 Java。空闲时只保留调度进程；有作业时才启动主写和复审 CLI。飞书是可选功能，不启用也可以下载材料、完成作业和本地审阅。
+**现在使用 Go 原生程序。** 核心是一个可执行文件，不需要安装 Python、pip、虚拟环境、Go 或 Java。macOS 发布包额外附带原生菜单栏监控。空闲时只保留调度和可选监控进程；有作业时才启动主写和复审 CLI。飞书是可选功能，不启用也可以下载材料、完成作业和本地审阅。
 
 [下载最新版本](https://github.com/Sskift/AvatarTHU/releases) · [反馈问题](https://github.com/Sskift/AvatarTHU/issues) · [来源与许可证](THIRD_PARTY.md)
 
 [从零开始安装](#quickstart) · [复制给 Agent 自动配置](#agent-setup)
+
+[macOS 菜单栏监控](#macos-menubar)
 
 ## 使用效果
 
@@ -66,6 +68,8 @@
 macOS / Linux 可用 `uname -m` 查看架构；Windows 可在“设置 → 系统 → 系统信息”查看系统类型。下载同一版本的 `SHA256SUMS`，用 `shasum -a 256 文件名`（macOS）、`sha256sum 文件名`（Linux）或 `Get-FileHash 文件名 -Algorithm SHA256`（PowerShell）与其中对应文件的值核对，然后解压。
 
 ### 2. 安装命令，暂不启动后台
+
+macOS 发布包中的 `AvatarTHU.app` 是菜单栏组件（macOS 12 及以上），请保留在 `avatarthu` 同一目录，初始化会一起安装。不需要安装 Swift、Xcode 或额外运行环境。
 
 在解压目录打开终端。macOS / Linux：
 
@@ -175,12 +179,12 @@ avatarthu keepalive status
 请按顺序完成：
 1. 检查操作系统、CPU 架构、已有 avatarthu、Claude Code、Codex CLI、浏览器和可选 Lark CLI。保留已有数据、登录和默认模型，不覆盖已有作业或账号配置；已有安装只补齐缺项。若已有后台在运行，报告状态并跳过首次安装、同步与启动。
 2. 如未安装 AvatarTHU，从本项目 GitHub Releases 选择最新可用的非草稿版本，包括预发布版。选择匹配系统与架构的压缩包，用同版本 SHA256SUMS 校验后解压。不要依赖 /releases/latest 一定存在，不要从第三方下载，也不要为运行 AvatarTHU 安装 Python、Go 或克隆源码编译。
-3. 使用解压后的程序执行 init --no-login --no-start。检查 avatarthu --version；当前终端 PATH 未刷新时使用安装输出的完整路径继续。数据统一通过 ~/.avatarthu 访问，Windows 使用 %USERPROFILE%\.avatarthu；不要放进仓库。
+3. 使用解压后的程序执行 init --no-login --no-start。macOS 保留同目录的 AvatarTHU.app，让初始化一起安装菜单栏组件。检查 avatarthu --version；当前终端 PATH 未刷新时使用安装输出的完整路径继续。数据统一通过 ~/.avatarthu 访问，Windows 使用 %USERPROFILE%\.avatarthu；不要放进仓库。
 4. 运行 avatarthu tools。复用已有 Claude Code 和 Codex CLI，缺失时按各自官方方式安装。引导我在各 CLI 中完成登录，再运行 avatarthu doctor；两种工具都要可用。沿用各 CLI 默认模型，不修改或比较模型。不要把工具安装成功说成作业已经验证正确。
 5. 全新安装按上述偏好执行 avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3（若我修改了偏好，相应调整参数）；已有配置保留原分工和间隔，除非我明确要求更改。运行 avatarthu login thu，再运行 avatarthu keepalive run，确认 state=valid。密码、验证码和扫码由我在官方登录界面完成，不要要求我把凭据贴进聊天。
 6. 若选择飞书，执行 avatarthu login lark --no-start，复用现有登录或引导我完成应用配置与授权；缺少可选依赖时明确说明。若选择本地模式，全新安装保持飞书关闭；不要擅自修改已有飞书绑定。
 7. 后台尚未运行时，执行 avatarthu run --sync-only，再用 avatarthu status 检查课程和作业列表。此步骤不启动写作或复审；启用飞书会推送未读公告并在成功后标已读。不要做真实作业提交测试。
-8. 两种模型 CLI 和学校登录就绪后，执行 avatarthu service start 并检查 avatarthu status、avatarthu keepalive status。确认调度进程 running、学校会话 valid；选择飞书时还应检查 actions/messages 是否 ready。后台将处理已发现的待交作业并使用我的 CLI 额度；以后按设定间隔扫描，无需负责安装的 Agent 一直在线。
+8. 两种模型 CLI 和学校登录就绪后，执行 avatarthu service start 并检查 avatarthu status、avatarthu keepalive status。确认调度进程 running、学校会话 valid；选择飞书时还应检查 actions/messages 是否 ready。macOS 还用 avatarthu menubar status 检查菜单栏，必要时运行 avatarthu menubar start。后台将处理已发现的待交作业并使用我的 CLI 额度；以后按设定间隔扫描，无需负责安装的 Agent 一直在线。
 9. 汇报实际版本、安装和数据路径、主写/复审分工、扫描/保活间隔、飞书是否启用、后台状态、已有审阅入口及停止命令 avatarthu service stop。任何步骤受阻，都说明具体原因和下一条操作，不把未完成项说成已完成；缺少工具时可停在仅同步阶段。
 
 提交作业必须等待我本人对当前版本的卡片操作；不要点击提交按钮或模拟回调。保留每轮独立复审意见，不用虚构结果展示配置成功。不要输出 Cookie、token、应用密钥或个人课程内容。
@@ -224,6 +228,27 @@ avatarthu keepalive status
 4. **休眠期间无法运行。** 电脑唤醒后按实际时间补查；macOS 由 LaunchAgent、Windows 由当前用户任务计划程序负责启动与恢复。Windows 不需要管理员服务或保存系统密码；需保持用户已登录。Linux 提供 systemd 用户服务。
 
 `service start` 不重复启动已运行的进程。`service stop` 停止调度、保活和飞书监听；保留所有数据。`avatarthu daemon` 可以直接在前台运行。
+
+<a id="macos-menubar"></a>
+
+## macOS 菜单栏监控
+
+从 `v0.2.0-alpha.2` 开始，macOS 发布包附带原生 AppKit 菜单栏。初始化安装组件后，`avatarthu service start` 会同时显示右上角的 **THU** 状态项；后面的数字是待审阅作业数。它不占用 Dock，也不需要常开终端。
+
+1. **看状态：** 绿色表示后台正常，蓝色表示正在处理作业，橙色表示登录、连接或作业需要处理，灰色表示后台停止。菜单显示最近保活、下次扫描、飞书卡片和消息连接，以及作业数量。
+2. **打开产物：** 从“打开审阅文档”进入现有云文档或本地审阅页，也可以打开课程目录、日志和详细状态窗口。
+3. **处理问题：** 可以启动或停止后台、立即检查保活、重新登录网络学堂。菜单栏没有作业提交按钮，提交仍由本人在当前版本卡片中确认。
+4. **独立开关：** “退出菜单栏”只关闭监控，后台继续运行，下次登录系统时重新显示。`service stop` 则只停止课程循环，菜单栏保留并显示停止状态。
+
+```sh
+avatarthu menubar start           # 打开菜单栏，并启用登录时显示
+avatarthu menubar status          # 检查是否安装及运行
+avatarthu menubar stop            # 关闭菜单栏及其自启动；后台继续运行
+```
+
+监控每 15 秒读取本地状态，展开菜单时立即刷新，不轮询学校或额外启动模型。它核对后台 PID 对应的可执行文件，避免把残留状态误报为运行中；保活成功记录超过 15 分钟会显示“待更新”。课程扫描和每 10 分钟保活仍在同一个 Go 进程中执行。
+
+旧版用户需重新下载完整 macOS 压缩包，在解压目录运行 `./avatarthu init --no-login --no-start`，再运行 `avatarthu menubar start`；已有课程、账号与作业保留。只用 `go build ./cmd/avatarthu` 构建的 CLI 不含菜单栏；完整 macOS 发布包需在 Mac 上通过 `go run ./cmd/release --os darwin --arch arm64 --out dist` 构建，Intel 架构使用 `--arch amd64`。只有开发者构建菜单栏时需要 Xcode Command Line Tools。
 
 ## 两种交叉复审模式
 
@@ -272,6 +297,7 @@ avatarthu notifications on
 ```text
 ~/.avatarthu/
 ├── bin/avatarthu                  # 原生可执行文件
+├── apps/AvatarTHU.app             # macOS 可选原生菜单栏
 ├── config.json                   # 分工、扫描频率、CLI 路径
 ├── session.json                  # 本人网络学堂会话
 ├── browser-profile/              # 本项目的浏览器登录配置
@@ -302,12 +328,13 @@ avatarthu run --task 作业编号      # 同步后只处理指定作业
 avatarthu keepalive run           # 立即保活并尝试恢复登录
 avatarthu status                  # 服务、登录、作业和审阅入口
 avatarthu service stop            # 停止后台，保留数据
-avatarthu uninstall               # 停用服务，仍保留数据
+avatarthu menubar status          # macOS 菜单栏状态
+avatarthu uninstall               # 停用后台与菜单栏，仍保留数据
 ```
 
 ## 开发与分发
 
-仅开发者需要 Go 1.27.1。生产程序使用 `CGO_ENABLED=0` 构建，不需要额外动态库或解释器。
+仅开发者需要 Go 1.27.1。核心程序使用 `CGO_ENABLED=0` 构建，不需要额外动态库或解释器。macOS 菜单栏使用系统 AppKit，发布时在 macOS 上编译 Swift 并附带应用包；使用者无需安装开发工具。
 
 ```sh
 go test ./...

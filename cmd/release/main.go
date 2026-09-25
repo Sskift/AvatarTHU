@@ -26,7 +26,7 @@ func must(err error) {
 }
 func main() {
 	dest := flag.String("out", "dist", "output directory")
-	version := flag.String("version", "0.2.0-alpha.1", "version without v")
+	version := flag.String("version", "0.2.0-alpha.2", "version without v")
 	targetOS := flag.String("os", runtime.GOOS, "target operating system")
 	targetArch := flag.String("arch", runtime.GOARCH, "target architecture")
 	flag.Parse()
@@ -43,6 +43,9 @@ func main() {
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+*targetOS, "GOARCH="+*targetArch)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	must(cmd.Run())
+	if *targetOS == "darwin" {
+		buildMenubar(stage, *targetArch, *version)
+	}
 	copyFile("README.md", filepath.Join(stage, "README.md"))
 	copyFile("README.en.md", filepath.Join(stage, "README.en.md"))
 	must(filepath.WalkDir("docs/images", func(p string, d os.DirEntry, e error) error {
@@ -155,4 +158,26 @@ func copyFile(src, dst string) {
 	defer d.Close()
 	_, e = io.Copy(d, s)
 	must(e)
+}
+
+func buildMenubar(stage, arch, version string) {
+	if runtime.GOOS != "darwin" {
+		panic("macOS 发布包需在 macOS 上使用系统 Swift 工具链构建菜单栏")
+	}
+	target := map[string]string{"arm64": "arm64-apple-macos12.0", "amd64": "x86_64-apple-macos12.0"}[arch]
+	if target == "" {
+		panic("unsupported macOS architecture: " + arch)
+	}
+	app := filepath.Join(stage, "AvatarTHU.app")
+	binary := filepath.Join(app, "Contents", "MacOS", "AvatarTHUMenuBar")
+	must(os.MkdirAll(filepath.Dir(binary), 0755))
+	cmd := exec.Command("xcrun", "swiftc", "-O", "-swift-version", "5", "-target", target, "macos/AvatarTHU/main.swift", "-o", binary)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	must(cmd.Run())
+	plist, err := os.ReadFile("macos/AvatarTHU/Info.plist")
+	must(err)
+	must(os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(strings.ReplaceAll(string(plist), "VERSION", strings.SplitN(version, "-", 2)[0])), 0644))
+	cmd = exec.Command("codesign", "--force", "--sign", "-", app)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	must(cmd.Run())
 }

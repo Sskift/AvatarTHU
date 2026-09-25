@@ -4,11 +4,13 @@
 
 A local assistant that connects Tsinghua Web Learning course materials, assignment work, and your final review.
 
-**Built as a native Go application.** Each platform gets a single executable: no Python, pip, virtual environment, Go, or Java runtime to install. The scheduler stays in the background and starts the writer and reviewer CLIs when work is available. Feishu is optional; downloading materials, preparing assignments, and reviewing them locally also work without it.
+**Built as a native Go application.** The core is a single executable: no Python, pip, virtual environment, Go, or Java runtime to install. macOS archives also include a native menu bar monitor. The scheduler and optional monitor stay in the background, and the writer and reviewer CLIs start when work is available. Feishu is optional; downloading materials, preparing assignments, and reviewing them locally also work without it.
 
 [Download a release](https://github.com/Sskift/AvatarTHU/releases) · [Report an issue](https://github.com/Sskift/AvatarTHU/issues) · [Attribution and licenses](THIRD_PARTY.md)
 
 [First-time setup](#quickstart) · [Copy a setup prompt for your agent](#agent-setup)
+
+[macOS menu bar monitor](#macos-menubar)
 
 ## See it in action
 
@@ -68,6 +70,8 @@ Open [Releases](https://github.com/Sskift/AvatarTHU/releases), choose the newest
 Use `uname -m` on macOS / Linux, or check **Settings → System → About** on Windows, to identify your architecture. Download `SHA256SUMS` from the same release. Compare the matching entry with `shasum -a 256 FILENAME` on macOS, `sha256sum FILENAME` on Linux, or `Get-FileHash FILENAME -Algorithm SHA256` in PowerShell, then extract the archive.
 
 ### 2. Install the command without starting the service
+
+Keep `AvatarTHU.app` beside `avatarthu` in the extracted macOS archive. Initialization installs this menu bar component too (macOS 12 or later). Users do not need Swift, Xcode, or an additional runtime.
 
 Open a terminal in the extracted directory. On macOS / Linux:
 
@@ -177,12 +181,12 @@ My preferences (defaults for a fresh installation; preserve existing configurati
 Complete these steps in order:
 1. Inspect the OS, CPU architecture, existing AvatarTHU, Claude Code, Codex CLI, browser, and optional Lark CLI. Preserve existing data, authentication, default models, assignments, and account bindings; only fill missing parts of an existing setup. If the service is already running, report its status and skip first-time installation, synchronization, and startup.
 2. If AvatarTHU is missing, select the newest available non-draft release from this project's GitHub Releases, including prereleases. Download the matching OS/architecture archive, verify it against SHA256SUMS from the same release, and extract it. Do not assume /releases/latest exists, use third-party downloads, or install Python/Go or build from source just to run AvatarTHU.
-3. Run the extracted executable with init --no-login --no-start. Check avatarthu --version; use the full installed path if this terminal's PATH has not refreshed. Access data through ~/.avatarthu, or %USERPROFILE%\.avatarthu on Windows. Keep runtime data outside the repository.
+3. Run the extracted executable with init --no-login --no-start. On macOS, keep AvatarTHU.app beside it so initialization also installs the menu bar component. Check avatarthu --version; use the full installed path if this terminal's PATH has not refreshed. Access data through ~/.avatarthu, or %USERPROFILE%\.avatarthu on Windows. Keep runtime data outside the repository.
 4. Run avatarthu tools. Reuse existing Claude Code and Codex CLI installations, or install missing tools using their official instructions. Let me authenticate in each CLI, then run avatarthu doctor; both tools must work. Keep each CLI's default model without changing or comparing models. Do not describe successful tool installation as proof of assignment correctness.
 5. For a fresh installation, apply my preferences using avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3, adjusting the arguments if I changed the preferences. Preserve existing roles and intervals unless I explicitly request changes. Run avatarthu login thu, then avatarthu keepalive run, and confirm state=valid. I will enter passwords, verification codes, and QR confirmations in the official login interface; do not ask me to paste credentials into chat.
 6. If I selected Feishu, run avatarthu login lark --no-start. Reuse authentication or guide me through application setup and authorization, explaining any missing optional dependencies. For local mode on a fresh installation, leave Feishu disabled. Do not change existing Feishu account bindings without my instruction.
 7. While the service is stopped, run avatarthu run --sync-only, then inspect the course and task list with avatarthu status. This does not start writing or review. If Feishu is enabled, it delivers unread announcements and marks them read after successful delivery. Do not test real homework submission.
-8. Once both model CLIs and the school session are ready, run avatarthu service start and check avatarthu status and avatarthu keepalive status. Confirm scheduler=running and school session=valid; with Feishu enabled, also check actions/messages=ready. The service will process discovered assignments using my CLI quota, then scan at the configured interval. The setup agent does not need to stay open.
+8. Once both model CLIs and the school session are ready, run avatarthu service start and check avatarthu status and avatarthu keepalive status. Confirm scheduler=running and school session=valid; with Feishu enabled, also check actions/messages=ready. On macOS, also check avatarthu menubar status and use avatarthu menubar start if needed. The service will process discovered assignments using my CLI quota, then scan at the configured interval. The setup agent does not need to stay open.
 9. Report the actual version, installation and data paths, writer/reviewer roles, polling and keepalive intervals, Feishu configuration, service status, any existing review links, and the stop command avatarthu service stop. For blocked steps, report the specific cause and next action without claiming completion. If tools are missing, stop at synchronization-only setup.
 
 Homework submission must wait for my action on the current revision's card. Do not press submit or simulate callbacks. Preserve all independent review comments and never fabricate results to demonstrate successful setup. Do not expose cookies, tokens, application secrets, or private course content.
@@ -226,6 +230,27 @@ avatarthu keepalive status
 4. **The computer must be awake.** After wake, overdue work is checked against the current time. macOS uses a LaunchAgent; Windows uses the current user's Task Scheduler for startup and recovery. Windows does not need an administrator service or a stored system password, but the user must remain signed in. Linux uses a systemd user service.
 
 `service start` does not launch duplicate processes. `service stop` stops scheduling, keepalive, and Feishu listeners while keeping all data. Use `avatarthu daemon` to run in the foreground.
+
+<a id="macos-menubar"></a>
+
+## macOS menu bar monitor
+
+Starting with `v0.2.0-alpha.2`, macOS archives include a native AppKit menu bar app. Once initialization installs it, `avatarthu service start` also displays **THU** in the menu bar. The number next to it counts assignments awaiting review. It does not occupy the Dock or require an open terminal.
+
+1. **Check status:** green means normal operation, blue means an assignment is being processed, orange means authentication, connections, or tasks need attention, and gray means the daemon is stopped. The menu shows the last keepalive, next scan, Feishu card/message connections, and task counts.
+2. **Open deliverables:** use “打开审阅文档” (Open review document) to open an existing cloud document or local review page. Course folders, logs, and a detailed status window are also available.
+3. **Resolve issues:** start or stop the daemon, check keepalive immediately, or sign in to Web Learning again. The monitor has no submission action; submission still requires your confirmation on the current revision's card.
+4. **Control it separately:** quitting the menu bar app leaves the daemon running and the monitor returns at the next system login. `service stop` stops the course loop while leaving the monitor visible with a stopped status.
+
+```sh
+avatarthu menubar start           # Show the monitor and enable it at login
+avatarthu menubar status          # Check installation and process status
+avatarthu menubar stop            # Disable the monitor and its autostart; keep the daemon
+```
+
+The monitor reads local state every 15 seconds and refreshes when opened. It does not poll the school or start models. It checks that the daemon PID belongs to the expected executable, so stale state cannot alone indicate a running daemon. Keepalive records older than 15 minutes show as pending refresh. Course polling and 10-minute keepalive still run in the same Go process.
+
+To upgrade, download the complete macOS archive, run `./avatarthu init --no-login --no-start` from the extracted directory, then `avatarthu menubar start`. Existing courses, accounts, and assignments are preserved. A CLI built with only `go build ./cmd/avatarthu` does not contain the monitor. Build a complete macOS archive on a Mac with `go run ./cmd/release --os darwin --arch arm64 --out dist`, or use `--arch amd64` for Intel. Only developers building the monitor need Xcode Command Line Tools.
 
 ## Two independent review modes
 
@@ -274,6 +299,7 @@ The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windo
 ```text
 ~/.avatarthu/
 ├── bin/avatarthu                  # Native executable
+├── apps/AvatarTHU.app             # Optional native macOS menu bar monitor
 ├── config.json                   # Roles, polling interval, CLI paths
 ├── session.json                  # Owner's Web Learning session
 ├── browser-profile/              # Dedicated browser login profile
@@ -304,12 +330,13 @@ avatarthu run --task TASK_ID      # Sync, then process only the specified assign
 avatarthu keepalive run           # Keep alive now and attempt session recovery
 avatarthu status                  # Services, authentication, tasks, and review links
 avatarthu service stop            # Stop the background service; preserve data
-avatarthu uninstall               # Disable the service; preserve data
+avatarthu menubar status          # macOS menu bar status
+avatarthu uninstall               # Disable the daemon and monitor; preserve data
 ```
 
 ## Development and distribution
 
-Only developers need Go 1.27.1. Production executables are built with `CGO_ENABLED=0` and do not need additional dynamic libraries or an interpreter.
+Only developers need Go 1.27.1. The core executable is built with `CGO_ENABLED=0` and does not need additional dynamic libraries or an interpreter. The menu bar app uses system AppKit; macOS releases compile Swift on a Mac and include the application bundle. Users do not need developer tools.
 
 ```sh
 go test ./...

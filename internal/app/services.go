@@ -65,6 +65,7 @@ func (a *App) init(noLogin, noStart bool) {
 		copyFile(current, target)
 		check(os.Chmod(target, 0755))
 	}
+	a.installMenubar(current)
 	home, e := os.UserHomeDir()
 	check(e)
 	alias := filepath.Join(home, ".avatarthu")
@@ -188,6 +189,7 @@ func (a *App) serviceStart() {
 	ensure(exists(a.installedBinary()), "请先运行 avatarthu init 安装命令")
 	a.retireLegacy()
 	if a.serviceLoaded() {
+		a.startMenubarIfEnabled()
 		fmt.Println("后台 loop 已在运行，通知设置在 15 秒内生效。")
 		return
 	}
@@ -215,6 +217,7 @@ func (a *App) serviceStart() {
 	default:
 		panic(fmt.Errorf("此系统请使用 avatarthu daemon 在前台运行"))
 	}
+	a.startMenubarIfEnabled()
 	fmt.Println("后台 loop 已启动。10 分钟保活，课程扫描按配置执行，退出终端后继续运行；登录系统自动启动，休眠唤醒后补查。")
 }
 func systemdQuote(s string) string {

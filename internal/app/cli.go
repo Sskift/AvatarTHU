@@ -159,8 +159,16 @@ func Main(args []string) (code int) {
 		default:
 			panic(fmt.Errorf("未知服务操作"))
 		}
+	case "menubar":
+		action := "status"
+		if len(args) == 2 {
+			action = args[1]
+		}
+		ensure(len(args) <= 2, "用法：avatarthu menubar start|stop|status")
+		a.menubarCommand(action)
 	case "uninstall":
 		a.serviceStop()
+		a.stopMenubar()
 	default:
 		panic(fmt.Errorf("未知命令 %s，运行 avatarthu --help", args[0]))
 	}
@@ -255,6 +263,7 @@ avatarthu configure --mode codex-claude     Codex 主写 / Claude 复审
 avatarthu configure --poll-interval 12h     设置课程轮询，保活固定 10 分钟
 avatarthu configure --max-review-rounds 3   复审不通过自动重写，0 表示不限
 avatarthu service start|stop|status         管理后台进程
+avatarthu menubar start|stop|status         macOS 原生菜单栏监控
 avatarthu run [--sync-only] [--task ID]     立即扫描或处理
 avatarthu revise ID --feedback "修改意见"  本地提出修改
 avatarthu keepalive status|run              查看或立即保活

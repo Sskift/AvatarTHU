@@ -7,17 +7,17 @@ permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {os: darwin, arch: arm64}
-          - {os: darwin, arch: amd64}
-          - {os: windows, arch: amd64}
-          - {os: windows, arch: arm64}
-          - {os: linux, arch: amd64}
-          - {os: linux, arch: arm64}
+          - {os: darwin, arch: arm64, runner: macos-15}
+          - {os: darwin, arch: amd64, runner: macos-15}
+          - {os: windows, arch: amd64, runner: ubuntu-latest}
+          - {os: windows, arch: arm64, runner: ubuntu-latest}
+          - {os: linux, arch: amd64, runner: ubuntu-latest}
+          - {os: linux, arch: arm64, runner: ubuntu-latest}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.2.0-alpha.1"; fi
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.2.0-alpha.2"; fi
           go run ./cmd/release --os '${{ matrix.os }}' --arch '${{ matrix.arch }}' --version "$version" --out dist
       - uses: actions/upload-artifact@v4
         with:
