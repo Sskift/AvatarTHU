@@ -229,6 +229,15 @@ func (a *App) serviceStop() {
 	switch runtime.GOOS {
 	case "darwin":
 		a.quiet("launchctl", "bootout", fmt.Sprintf("gui/%d/%s", os.Getuid(), serviceLabel))
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			check(a.Ctx.Err())
+			if !a.serviceLoaded() {
+				break
+			}
+			ensure(time.Now().Before(deadline), "后台仍在退出；请稍后查看 avatarthu status，再运行 avatarthu service start")
+			time.Sleep(100 * time.Millisecond)
+		}
 		_ = os.Remove(filepath.Join(home, "Library/LaunchAgents", serviceLabel+".plist"))
 	case "windows":
 		a.quiet("schtasks", "/End", "/TN", `\AvatarTHU\daemon`)
