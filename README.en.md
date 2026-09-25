@@ -237,6 +237,8 @@ avatarthu keepalive status
 
 macOS archives include a native AppKit menu bar app. Once initialization installs it, `avatarthu service start` displays a **miniature university seal** that adapts to light and dark menu bars. The number next to it counts assignments awaiting review. There is no status dot in the menu bar, Dock icon, or need for an open terminal.
 
+<img src="docs/images/menubar.png" alt="AvatarTHU macOS menu: four service indicators, keepalive and course polling schedule, assignment review, and daemon controls" width="360">
+
 1. **Check status:** the menu has separate labeled indicators for **Lark CLI, Learn (Web Learning), Claude, and Codex**. Green means checks passed, red means an error, orange means a pending check, connection, or stale record, and gray means disabled or stopped connections. Daemon state, last keepalive, next scan, and task counts appear separately.
 2. **Open deliverables:** use “打开审阅文档” (Open review document) to open an existing cloud document or local review page. Course folders, logs, and a detailed status window are also available.
 3. **Resolve issues:** start or stop the daemon, check keepalive immediately, or sign in to Web Learning again. The monitor has no submission action; submission still requires your confirmation on the current revision's card.
