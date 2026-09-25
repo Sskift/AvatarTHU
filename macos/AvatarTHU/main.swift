@@ -25,6 +25,7 @@ struct Indicator {
         switch state {
         case "ready": return .systemGreen
         case "error": return .systemRed
+        case "busy": return .systemBlue
         case "off": return .secondaryLabelColor
         default: return .systemOrange
         }
@@ -50,6 +51,24 @@ struct Indicator {
         else if reason.contains("版本") { text = "需要更新 CLI" }
         else { text = "检查失败" }
         return Indicator(state: "error", text: text, detail: detail)
+    }
+
+    func withExecution(_ execution: Object, running: Bool) -> Indicator {
+        switch execution["state"] as? String {
+        case "failed":
+            let reason = execution["reason"] as? String ?? "执行失败"
+            let action = execution["action"] as? String ?? "查看错误详情后恢复"
+            let retry = execution["retryable"] as? Bool == true ? "后台会重试，也可手动恢复。" : "自动重试已暂停；处理后点击检查并恢复。"
+            let requested = execution["retry_requested_at"] as? String != nil
+            return Indicator(state: "error", text: reason, detail: "最近执行异常：\(reason)\n\(action)\n\(requested ? "已请求恢复，等待实际执行成功。" : retry)\n本地检查：\(text)")
+        case "running":
+            if running && processAlive((execution["pid"] as? NSNumber)?.int32Value ?? 0) {
+                let phase = execution["phase"] as? String == "reviewer" ? "正在独立复审" : "正在主写"
+                return Indicator(state: "busy", text: phase, detail: "\(phase)；使用此 CLI 的默认模型。\n本地检查：\(text)")
+            }
+            return Indicator(state: "unknown", text: "上次执行已中断", detail: "执行进程已结束，等待后台从已完成阶段继续。\n本地检查：\(text)")
+        default: return self
+        }
     }
 }
 
@@ -110,12 +129,30 @@ struct Snapshot {
     var claude = Indicator(state: "unknown", text: "尚未检查")
     var codex = Indicator(state: "unknown", text: "尚未检查")
     var cliCheckedAt: Date?
+    var executions: [String: Object] = [:]
+    var localCLI: [String: Indicator] = [:]
+    var configuredMode = "claude-codex"
+    var activeModes: [String] = []
     var busy = 0
     var queued = 0
     var awaiting = 0
     var attention = 0
     var reviews: [Object] = []
     var version = ""
+
+    static func modeText(_ mode: String) -> String {
+        switch mode {
+        case "claude-codex": return "主写 Claude · 复审 Codex"
+        case "codex-claude": return "主写 Codex · 复审 Claude"
+        default: return "分工配置待检查"
+        }
+    }
+    var modeText: String { Snapshot.modeText(configuredMode) }
+
+    mutating func applyExecutionStatus() {
+        claude = claude.withExecution(executions["claude"] ?? [:], running: running)
+        codex = codex.withExecution(executions["codex"] ?? [:], running: running)
+    }
 
     var kind: String {
         if !running { return "stopped" }
@@ -138,6 +175,8 @@ struct Snapshot {
         s.pid = (health["pid"] as? NSNumber)?.int32Value ?? 0
         s.running = health["state"] as? String == "running" && processAlive(s.pid, executable: root.appendingPathComponent("bin/avatarthu"))
         s.version = health["version"] as? String ?? ""
+        s.configuredMode = config["review_mode"] as? String ?? "claude-codex"
+        for tool in ["claude", "codex"] { s.executions[tool] = readObject(root.appendingPathComponent("data/\(tool)-execution.json")) }
         let session = config["session"] as? String ?? root.appendingPathComponent("session.json").path
         let keepalive = readObject(URL(fileURLWithPath: session).deletingLastPathComponent().appendingPathComponent("keepalive-status.json"))
         s.lastSuccess = dateValue(keepalive["last_success"])
@@ -154,6 +193,7 @@ struct Snapshot {
         let cliRecords = readObjects(root.appendingPathComponent("data/cli-health.json"))
         s.claude = Indicator.cli("claude", records: cliRecords, now: now)
         s.codex = Indicator.cli("codex", records: cliRecords, now: now)
+        s.localCLI = ["claude": s.claude, "codex": s.codex]
         let cliDates = ["claude", "codex"].compactMap { tool in dateValue(cliRecords.first { $0["tool"] as? String == tool }?["checked_at"]) }
         if cliDates.count == 2 { s.cliCheckedAt = cliDates.min() }
         s.pollSeconds = (config["poll_interval_seconds"] as? Double) ?? 43200
@@ -180,7 +220,10 @@ struct Snapshot {
         for url in taskURLs where url.pathExtension == "json" {
             let task = readObject(url)
             switch task["status"] as? String {
-            case "working", "reviewing", "rewriting": s.busy += 1
+            case "working", "reviewing", "rewriting":
+                s.busy += 1
+                let plan = task["execution_plan"] as? Object ?? [:]
+                if let mode = plan["mode"] as? String, !s.activeModes.contains(mode) { s.activeModes.append(mode) }
             case "queued", "revision_ready", "delivery_pending": s.queued += 1
             case "awaiting": s.awaiting += 1; s.reviews.append(task)
             case "needs_student", "failed", "approval_invalid", "submission_unknown": s.attention += 1; s.reviews.append(task)
@@ -188,6 +231,7 @@ struct Snapshot {
             }
         }
         s.reviews.sort { ($0["updated_at"] as? String ?? "") > ($1["updated_at"] as? String ?? "") }
+        s.applyExecutionStatus()
         return s
     }
 
@@ -197,6 +241,7 @@ struct Snapshot {
                 "school_valid": schoolOK, "poll_interval_seconds": pollSeconds,
                 "lark_enabled": lark, "actions_ready": actions, "messages_ready": messages,
                 "indicators": ["lark_cli": larkCLI.state, "learn": learn.state, "claude": claude.state, "codex": codex.state],
+                "review_mode": configuredMode, "active_review_modes": activeModes,
                 "working": busy, "queued": queued, "awaiting": awaiting, "attention": attention]
     }
 }
@@ -272,17 +317,21 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func refresh() {
         snapshot = Snapshot.load(root: root)
+        snapshot.claude = snapshot.localCLI["claude"] ?? snapshot.claude
+        snapshot.codex = snapshot.localCLI["codex"] ?? snapshot.codex
         checkCLIsIfNeeded()
         if let error = cliProbeError {
             snapshot.claude = Indicator(state: "error", text: "检查未完成", detail: error)
             snapshot.codex = snapshot.claude
         } else if cliProbe != nil {
-            if snapshot.claude.state != "ready" { snapshot.claude = Indicator(state: "checking", text: "正在检查…") }
-            if snapshot.codex.state != "ready" { snapshot.codex = Indicator(state: "checking", text: "正在检查…") }
+            if snapshot.claude.state != "ready" && snapshot.claude.state != "busy" { snapshot.claude = Indicator(state: "checking", text: "正在检查…") }
+            if snapshot.codex.state != "ready" && snapshot.codex.state != "busy" { snapshot.codex = Indicator(state: "checking", text: "正在检查…") }
         }
+        // A successful local login check must not hide a failed model request.
+        snapshot.applyExecutionStatus()
         let fallback = item.button?.image == nil ? "THU" : ""
         item.button?.title = fallback + (snapshot.awaiting > 0 ? " \(snapshot.awaiting)" : "")
-        item.button?.toolTip = "AvatarTHU · \(snapshot.headline)\n网络学堂：\(snapshot.school)\n待审阅 \(snapshot.awaiting) · 需处理 \(snapshot.attention)"
+        item.button?.toolTip = "AvatarTHU · \(snapshot.headline)\n\(snapshot.modeText)\n网络学堂：\(snapshot.school)\n待审阅 \(snapshot.awaiting) · 需处理 \(snapshot.attention)"
         for (title, indicator) in [("Lark CLI", snapshot.larkCLI), ("Learn · 网络学堂", snapshot.learn), ("Claude", snapshot.claude), ("Codex", snapshot.codex)] {
             guard let views = indicatorViews[title] else { continue }
             views.dot.layer?.backgroundColor = indicator.color.cgColor
@@ -400,11 +449,23 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let heading = row("AvatarTHU")
         heading.attributedTitle = NSAttributedString(string: "AvatarTHU", attributes: [.font: NSFont.systemFont(ofSize: 15, weight: .semibold), .foregroundColor: NSColor.labelColor])
         row(snapshot.headline + (snapshot.running ? " · PID \(snapshot.pid)" : ""))
+        if snapshot.activeModes.contains(where: { $0 != snapshot.configuredMode }) {
+            for mode in snapshot.activeModes { row("当前作业 · \(Snapshot.modeText(mode))") }
+            row("后续版本 · \(snapshot.modeText)")
+        } else { row(snapshot.modeText) }
         menu.addItem(.separator())
         indicatorRow("Lark CLI", snapshot.larkCLI)
         indicatorRow("Learn · 网络学堂", snapshot.learn)
         indicatorRow("Claude", snapshot.claude)
         indicatorRow("Codex", snapshot.codex)
+        for tool in ["claude", "codex"] {
+            guard let failure = snapshot.executions[tool], failure["state"] as? String == "failed" else { continue }
+            let title = tool == "claude" ? "Claude" : "Codex"
+            let details = row("\(title) 执行异常详情…", action: #selector(showFailure(_:)), symbol: "exclamationmark.bubble")
+            details.representedObject = tool
+            let retry = row("检查并恢复 \(title)", action: #selector(retryTool(_:)), symbol: "arrow.clockwise")
+            retry.representedObject = tool
+        }
         menu.addItem(.separator())
         row("最近保活 · \(timeText(snapshot.lastSuccess))（每 10 分钟）")
         let interval = snapshot.pollSeconds >= 3600 ? String(format: "%g 小时", snapshot.pollSeconds / 3600) : String(format: "%g 分钟", snapshot.pollSeconds / 60)
@@ -443,6 +504,16 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openCourses() { NSWorkspace.shared.open(root.appendingPathComponent("courses")) }
     @objc func openLog() { NSWorkspace.shared.open(root.appendingPathComponent("logs/daemon.log")) }
+    @objc func showFailure(_ sender: NSMenuItem) {
+        guard let tool = sender.representedObject as? String, let failure = snapshot.executions[tool] else { return }
+        let role = failure["phase"] as? String == "reviewer" ? "独立复审" : (failure["phase"] as? String == "writer" ? "主写" : "启动检查")
+        let retry = failure["retryable"] as? Bool == true ? "后台 15 分钟后重试，也可以在菜单中手动恢复。" : "自动重试已暂停；处理后在菜单中点击检查并恢复。"
+        showText("\(tool.capitalized) 执行异常", "阶段：\(role)\n时间：\(timeText(dateValue(failure["time"])))\n原因：\(failure["reason"] as? String ?? "执行失败")\n\n处理方式：\(failure["action"] as? String ?? "检查 CLI 设置")\n\(retry)\n\n错误日志：\(failure["log"] as? String ?? "无独立日志，请查看后台日志")\n\n恢复命令：avatarthu retry --tool \(tool)")
+    }
+    @objc func retryTool(_ sender: NSMenuItem) {
+        guard let tool = sender.representedObject as? String, ["claude", "codex"].contains(tool) else { return }
+        execute(["retry", "--tool", tool], title: "检查并恢复 \(tool.capitalized)", openingText: "正在检查两个 CLI 的本地可用性，通过后将失败作业排队，由后台继续主写或复审。")
+    }
     @objc func openReview(_ sender: NSMenuItem) {
         guard let task = sender.representedObject as? Object else { return }
         if let doc = task["review_doc"] as? Object, let text = doc["url"] as? String,

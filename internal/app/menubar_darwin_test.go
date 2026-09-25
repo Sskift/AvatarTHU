@@ -86,7 +86,7 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 	if binary == "" {
 		t.Skip("set AVATARTHU_MENUBAR_TEST_BINARY to test the compiled AppKit monitor")
 	}
-	for _, name := range []string{"all_ready", "codex_login_failed", "stale_cli", "missing_cli", "partial_lark", "lark_disabled", "learn_expired"} {
+	for _, name := range []string{"all_ready", "codex_login_failed", "stale_cli", "missing_cli", "partial_lark", "lark_disabled", "learn_expired", "runtime_quota", "requested_retry", "recovered", "active_mode"} {
 		t.Run(name, func(t *testing.T) {
 			a := testApp(t)
 			mkdir(filepath.Join(a.Root, "bin"))
@@ -126,6 +126,18 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 				want["lark_cli"] = "off"
 			case "learn_expired":
 				want["learn"] = "error"
+			case "runtime_quota", "requested_retry":
+				health := M{"state": "failed", "reason": "额度或频率限制", "category": "quota", "retryable": false}
+				if name == "requested_retry" {
+					health["retry_requested_at"] = stamp()
+				}
+				writeJSON(a.data("claude-execution.json"), health)
+				want["claude"] = "error"
+			case "recovered":
+				writeJSON(a.data("claude-execution.json"), M{"state": "succeeded"})
+			case "active_mode":
+				a.saveConfig(M{"lark_enabled": true, "review_mode": "codex-claude"})
+				writeJSON(a.taskPath("0123456789abcdef"), M{"status": "reviewing", "execution_plan": M{"mode": "claude-codex"}})
 			}
 			writeJSON(a.data("cli-health.json"), records)
 			out, e := exec.Command(binary, "--home", a.Root, "--snapshot").CombinedOutput()
@@ -138,6 +150,9 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 				if str(obj(result, "indicators"), tool) != state {
 					t.Errorf("%s: want %s, got %s", tool, state, out)
 				}
+			}
+			if name == "active_mode" && (str(result, "review_mode") != "codex-claude" || len(texts(result["active_review_modes"])) != 1 || texts(result["active_review_modes"])[0] != "claude-codex") {
+				t.Fatalf("lost running version's pairing: %s", out)
 			}
 		})
 	}

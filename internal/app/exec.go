@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,18 +132,25 @@ func nativeLark(launcher string) string {
 }
 func diagnosticError(tool, text, log string) error {
 	low := strings.ToLower(text)
+	if strings.Contains(low, "fork/exec") && strings.Contains(low, "no such file or directory") {
+		low += " executable file not found"
+	}
 	reason := "CLI 执行失败"
 	action := "先在终端单独运行 " + tool + " 排查"
+	category, retryable := "execution", true
 	patterns := []struct {
 		keys           []string
 		reason, action string
+		category       string
+		retryable      bool
 	}{
-		{[]string{"401", "unauthorized", "authentication", "not logged", "login required", "invalid api key"}, "未登录或授权失效", "运行 " + tool + " 完成登录"},
-		{[]string{"429", "402", "rate limit", "usage limit", "quota", "credit", "额度", "余额"}, "额度或频率限制", "检查账号额度或等待限制重置"},
-		{[]string{"unknown option", "unknown feature", "unrecognized argument", "unexpected argument", "no such command"}, "CLI 版本不兼容", "更新 CLI 后运行 avatarthu doctor"},
-		{[]string{"403", "forbidden", "permission denied", "access denied"}, "权限不足", "检查 CLI 账号、可执行文件和工作目录权限"},
-		{[]string{"connection", "timeout", "timed out", "deadline exceeded", "resolve", "proxy", "certificate", "tls", "502", "503", "504", "network"}, "网络或服务暂时不可用", "检查网络、代理及服务状态"},
-		{[]string{"sandbox", "bwrap"}, "CLI 执行环境未就绪", "在终端单独运行 CLI，完成它要求的首次设置"},
+		{[]string{"未找到 cli", "executable file not found"}, "未找到 CLI", "运行 avatarthu tools 查看安装方式，安装后运行 avatarthu configure", "missing", false},
+		{[]string{"401", "unauthorized", "authentication", "not logged", "login required", "invalid api key", "尚未登录", "授权失效"}, "未登录或授权失效", "运行 " + tool + " 完成登录", "auth", false},
+		{[]string{"429", "402", "rate limit", "usage limit", "quota", "credit", "额度", "余额"}, "额度或频率限制", "检查账号额度或等待限制重置，再手动恢复作业", "quota", false},
+		{[]string{"unknown option", "unknown feature", "unrecognized argument", "unexpected argument", "no such command", "版本不兼容"}, "CLI 版本不兼容", "更新 CLI 后运行 avatarthu doctor", "version", false},
+		{[]string{"403", "forbidden", "permission denied", "access denied"}, "权限不足", "检查 CLI 账号、可执行文件和工作目录权限", "permission", false},
+		{[]string{"connection", "timeout", "timed out", "deadline exceeded", "resolve", "proxy", "certificate", "tls", "502", "503", "504", "network"}, "网络或服务暂时不可用", "检查网络、代理及服务状态；后台 15 分钟后重试，也可手动恢复", "network", true},
+		{[]string{"sandbox", "bwrap"}, "CLI 执行环境未就绪", "在终端单独运行 CLI，完成它要求的首次设置", "environment", false},
 	}
 	found := false
 	for _, p := range patterns {
@@ -152,6 +158,7 @@ func diagnosticError(tool, text, log string) error {
 			if strings.Contains(low, k) {
 				reason = p.reason
 				action = p.action
+				category, retryable = p.category, p.retryable
 				found = true
 				break
 			}
@@ -163,17 +170,15 @@ func diagnosticError(tool, text, log string) error {
 	if !found && strings.Contains(low, "model") {
 		reason = "CLI 默认配置不可用"
 		action = "先单独运行 CLI 排查自己的默认设置；AvatarTHU 不更改模型"
+		category, retryable = "configuration", false
 	}
-	if log != "" {
-		action += "；日志：" + log
-	}
-	return fmt.Errorf("%s：%s。%s", tool, reason, action)
+	return &toolFailure{Tool: tool, Category: category, Reason: reason, Action: action, Log: log, Retryable: retryable}
 }
 func (a *App) probe(tool, path string) M {
 	r := M{"tool": tool, "checked_at": stamp(), "usable": false}
 	path = findExecutable(tool, path)
 	if path == "" {
-		merge(r, M{"reason": "未找到 CLI", "action": "运行 avatarthu tools 查看安装方式；安装后运行 avatarthu configure 刷新路径"})
+		merge(r, failureFields(diagnosticError(tool, "未找到 CLI", "")))
 		return r
 	}
 	err := attempt(func() {
@@ -209,7 +214,11 @@ func (a *App) probe(tool, path string) M {
 		merge(r, M{"usable": true, "reason": "可启动，登录检查通过", "action": "实际执行中的额度、网络和权限错误会保存在作业状态中"})
 	})
 	if err != nil {
-		merge(r, M{"reason": safeError(err), "action": "先单独运行 " + tool + " 排查，再运行 avatarthu doctor"})
+		failure := failureFields(err)
+		if len(failure) == 0 {
+			failure = failureFields(diagnosticError(tool, err.Error(), ""))
+		}
+		merge(r, failure)
 	}
 	return r
 }
@@ -222,11 +231,17 @@ func (a *App) requirePair(plan M) {
 	if a.RunModel != nil {
 		return
 	}
-	bad := []string{}
+	var first error
 	for _, r := range a.inspectPair(plan) {
 		if !boolean(r, "usable") {
-			bad = append(bad, str(r, "tool")+"："+str(r, "reason")+"。"+str(r, "action"))
+			failure := &toolFailure{Tool: str(r, "tool"), Category: str(r, "category"), Reason: str(r, "reason"), Action: str(r, "action"), Retryable: boolean(r, "retryable")}
+			a.recordToolFailure(failure, "preflight", "")
+			if first == nil {
+				first = failure
+			}
 		}
 	}
-	ensure(len(bad) == 0, "交叉复审需要两个 CLI 都可用：\n"+strings.Join(bad, "\n"))
+	if first != nil {
+		panic(first)
+	}
 }

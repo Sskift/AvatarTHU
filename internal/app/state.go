@@ -22,7 +22,7 @@ import (
 
 type M = map[string]any
 
-var Version = "0.2.0-alpha.4"
+var Version = "0.2.0-alpha.5"
 var beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 
 type App struct {

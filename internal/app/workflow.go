@@ -144,6 +144,20 @@ func validateWriter(r M, job string) M {
 		r["ready"] = false
 	}
 	if pres := obj(r, "presentation"); len(pres) > 0 {
+		notes := objects(pres["revision_notes"])
+		ensure(len(notes) <= 30, "逐条修改说明超过 30 项")
+		for _, note := range notes {
+			status := str(note, "status")
+			ensure(status == "addressed" || status == "partial" || status == "unresolved", "修改说明状态无效")
+			ensure(len([]rune(str(note, "request"))) <= 500 && len([]rune(str(note, "detail"))) <= 2000, "修改说明过长")
+			for _, file := range texts(note["files"]) {
+				path := filepath.ToSlash(file)
+				if !strings.HasPrefix(path, "final/") {
+					path = "final/" + path
+				}
+				ensure(seen[path], "修改说明必须引用当前交付文件")
+			}
+		}
 		ensure(len([]rune(str(pres, "assignment"))) <= 4000, "题意摘要过长")
 		ensure(len(texts(pres["checks"])) <= 8, "检查摘要过多")
 		points := objects(pres["highlights"])
@@ -271,6 +285,7 @@ func (a *App) process(st M) {
 	case "awaiting", "needs_student", "submitted", "submission_unknown", "submitting", "closed_remote", "approval_invalid":
 		return
 	case "revision_ready":
+		a.rememberRevision(st)
 		st["previous_job"] = st["job"]
 		st["revision"] = number(st, "revision", 0) + 1
 		for _, k := range []string{"job", "review_attempt", "execution_plan", "review_round", "review_feedback", "review_outcome"} {
@@ -290,6 +305,7 @@ func (a *App) process(st M) {
 		st["execution_plan"] = plan
 	}
 	a.saveTask(st)
+	a.requireUnblockedTools()
 	a.requirePair(plan)
 	var result M
 	var job string

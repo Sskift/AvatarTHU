@@ -74,6 +74,11 @@ func Main(args []string) (code int) {
 		if !okay {
 			return 1
 		}
+	case "retry":
+		f := flag.NewFlagSet("retry", flag.ContinueOnError)
+		tool := f.String("tool", "", "claude 或 codex")
+		check(f.Parse(args[1:]))
+		a.retryTool(*tool)
 	case "tools":
 		printTools()
 	case "login":
@@ -240,6 +245,12 @@ func (a *App) status() {
 	}
 	p := a.pairing()
 	fmt.Printf("主写 %s / 独立复审 %s；模型沿用各自默认配置。\n", str(p, "writer"), str(p, "reviewer"))
+	for _, tool := range []string{"claude", "codex"} {
+		h := readMap(a.data(tool + "-execution.json"))
+		if str(h, "state") == "failed" {
+			fmt.Printf("%s 最近执行异常：%s\n  %s；恢复命令：avatarthu retry --tool %s\n", tool, str(h, "reason"), str(h, "action"), tool)
+		}
+	}
 	for _, st := range a.tasks() {
 		fmt.Printf("\n%s · %s · r%d · %s\n", str(st, "task_id"), str(st, "title"), number(st, "revision", 1), str(st, "status"))
 		if str(st, "error") != "" {
@@ -269,6 +280,7 @@ avatarthu revise ID --feedback "修改意见"  本地提出修改
 avatarthu keepalive status|run              查看或立即保活
 avatarthu notifications on|off              可选飞书推送
 avatarthu doctor                           检查两种执行器的安装和登录
+avatarthu retry --tool claude|codex        恢复该工具的失败作业，不触发提交
 avatarthu tools                            查看外部工具安装方式
 avatarthu status                           查看作业、审阅文档和服务状态
 avatarthu daemon                           前台运行同一个后台循环

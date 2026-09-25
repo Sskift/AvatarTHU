@@ -263,7 +263,7 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 		return `<figure view-type="Card"><source path="@./` + esc(filepath.ToSlash(relative(a.Root, p))) + `" name="` + esc(name) + `"/></figure>`
 	}
 	pres := obj(st, "presentation")
-	blocks := []string{"<title>" + esc(fmt.Sprintf("%s · 第 %d 版审阅", str(st, "title"), number(st, "revision", 1))) + "</title>", paragraph(str(st, "course") + " · 截止 " + str(st, "deadline") + "（北京时间）"), `<callout emoji="📦" background-color="light-blue">` + paragraph(fmt.Sprintf("本版有 %d 份交付文件，完整产物集中在第三部分。请对照原题审阅；待补充事项见第二部分。", len(paths))) + "</callout>", "<h1>一、作业描述</h1>"}
+	blocks := []string{"<title>" + esc(fmt.Sprintf("%s · 第 %d 版审阅", str(st, "title"), number(st, "revision", 1))) + "</title>", paragraph(str(st, "course") + " · 截止 " + str(st, "deadline") + "（北京时间）"), `<callout emoji="📦" background-color="light-blue">` + paragraph(fmt.Sprintf("本版有 %d 份交付文件，完整产物集中在第三部分。请对照原题审阅；待补充事项见第二部分。", len(paths))) + "</callout>", a.revisionChanges(st, local, attach), "<h1>一、作业描述</h1>"}
 	assignment := strDefault(st, "description", "未提供文字描述，请查看原题附件。")
 	blocks = append(blocks, prose(cut(assignment, 6000)))
 	if cut(assignment, 6000) != assignment {
@@ -432,9 +432,13 @@ func (a *App) publishLocal(st M) {
 		if n.Data == "img" {
 			n.Attr = []html.Attribute{{Key: "src", Val: u.String()}, {Key: "loading", Val: "lazy"}, {Key: "alt", Val: filepath.Base(target)}}
 		} else {
+			label := attr(n, "name")
+			if label == "" {
+				label = filepath.Base(target)
+			}
 			n.Data = "a"
 			n.Attr = []html.Attribute{{Key: "href", Val: u.String()}, {Key: "class", Val: "attachment"}}
-			n.AppendChild(&html.Node{Type: html.TextNode, Data: filepath.Base(target)})
+			n.AppendChild(&html.Node{Type: html.TextNode, Data: label})
 		}
 	}
 	for _, n := range nodes(root, func(n *html.Node) bool { return n.Data == "callout" }) {

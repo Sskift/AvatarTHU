@@ -239,10 +239,11 @@ macOS archives include a native AppKit menu bar app. Once initialization install
 
 <img src="docs/images/menubar.png" alt="AvatarTHU macOS menu: four service indicators, keepalive and course polling schedule, assignment review, and daemon controls" width="360">
 
-1. **Check status:** the menu has separate labeled indicators for **Lark CLI, Learn (Web Learning), Claude, and Codex**. Green means checks passed, red means an error, orange means a pending check, connection, or stale record, and gray means disabled or stopped connections. Daemon state, last keepalive, next scan, and task counts appear separately.
+1. **Check status:** the menu shows the writer/reviewer pairing and separate indicators for **Lark CLI, Learn (Web Learning), Claude, and Codex**. Green means local checks passed, blue means writing or reviewing, red means a local or recent execution error, orange means pending or stale status, and gray means disabled or stopped connections. If the pairing changes during a task, the active version's pairing and the setting for future versions appear separately.
 2. **Open deliverables:** use “打开审阅文档” (Open review document) to open an existing cloud document or local review page. Course folders, logs, and a detailed status window are also available.
 3. **Resolve issues:** start or stop the daemon, check keepalive immediately, or sign in to Web Learning again. The monitor has no submission action; submission still requires your confirmation on the current revision's card.
 4. **Control it separately:** quitting the menu bar app leaves the daemon running and the monitor returns at the next system login. `service stop` stops the course loop while leaving the monitor visible with a stopped status.
+5. **Recover execution:** a failed model request adds error details and a “检查并恢复” (Check and resume) action for that tool. Successful local authentication checks do not hide execution failures. Recovery rechecks both CLIs and queues failed work; only a successful execution clears the error.
 
 ```sh
 avatarthu menubar start           # Show the monitor and enable it at login
@@ -291,8 +292,20 @@ Feishu login reuses a valid local Lark CLI session. If none is configured, it gu
 4. Leave document comments and choose “按文档批注修改” (“Revise from document comments”), write feedback on the card, reply to the current card, or run `avatarthu revise TASK_ID --feedback "Your requested changes"` locally.
 5. Only the owner's submission action on the current revision's card can upload the work. The revision, message, nonce, and local file hashes must match. School-side requirements, attachments, and the deadline are checked again. A new revision invalidates the old card.
 6. Submission status is persisted before contacting the school API. When a timeout or disconnection leaves the result unknown, **the upload is never retried automatically**. The owner must check Web Learning.
+7. From revision 2 onward, a **Changes in this revision** section appears near the beginning: responses to feedback, unresolved items, links to the previous review and deliverables, and actual file changes. Text, code, and ZIP members support line comparisons; PDF and Office files remain available side by side. Responses are labeled as writer notes and are not passed to the independent reviewer. Missing or changed historical files are reported instead of inventing differences.
 
 Local-only mode creates an HTML review page with the same sections. Run `avatarthu status` to find its path, and submit manually through the school website. Enabling Feishu later can publish an existing revision as a document and card without redoing the assignment.
+
+## Execution errors and recovery
+
+Authentication, quota/rate limits, incompatible CLI versions, permissions, and default configuration errors pause automatic retries for the affected tool. Temporary network errors and timeouts retry after 15 minutes. After fixing the account or environment, choose “检查并恢复” (Check and resume) in the menu, or run:
+
+```sh
+avatarthu retry --tool claude
+avatarthu retry --tool codex
+```
+
+Recovery queues failed writing/review work and resumes from completed stages using that version's saved pairing. It never uploads homework or retries submissions with unknown outcomes. School keepalive, announcement synchronization, and Feishu callbacks continue running.
 
 ## Storage layout
 

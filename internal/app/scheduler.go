@@ -126,7 +126,7 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 			default:
 				return
 			}
-			if status == "failed" && tick && parseTime(str(st, "retry_at")).After(time.Now()) {
+			if !taskRetryDue(st, tick) {
 				return
 			}
 			if status == "failed" {
@@ -134,15 +134,23 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 			}
 			e := attempt(func() { a.process(st) })
 			if e != nil {
-				st["resume_status"] = st["status"]
-				merge(st, M{"status": "failed", "error": safeError(e), "retry_at": time.Now().Add(15 * time.Minute).Format(time.RFC3339)})
-				a.saveTask(st)
+				success = false
+				a.saveTaskFailure(st, e)
 				fmt.Fprintln(os.Stderr, safeError(e))
 				if a.Ctx.Err() == nil {
 					_ = attempt(func() {
-						a.notifyOnce(fmt.Sprintf("task-error:%s:%d:%s", tid, number(st, "revision", 1), fingerprint(e.Error())), "作业处理需要检查："+str(st, "title")+"\n"+cut(safeError(e), 1000)+"\n修复后运行 avatarthu run 从成功阶段继续。")
+						recovery := "后台稍后从成功阶段继续，也可运行 avatarthu run。"
+						if boolean(st, "retry_blocked") {
+							recovery = "已暂停此工具的自动重试。处理后从菜单栏恢复，或运行 avatarthu retry --tool " + str(obj(st, "failure"), "tool") + "。"
+						}
+						a.notifyOnce(fmt.Sprintf("task-error:%s:%d:%s", tid, number(st, "revision", 1), fingerprint(e.Error())), "作业处理需要检查："+str(st, "title")+"\n"+cut(safeError(e), 1000)+"\n"+recovery)
 					})
 				}
+			} else {
+				for _, key := range []string{"error", "failure", "retry_blocked", "retry_at", "retry_requested_at", "resume_status"} {
+					delete(st, key)
+				}
+				a.saveTask(st)
 			}
 		}()
 	}
