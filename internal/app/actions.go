@@ -236,8 +236,9 @@ func (a *App) message(event M) bool {
 }
 func (a *App) consume(ctx context.Context, key, name string, handler func(M) bool) {
 	exe := findExecutable("lark-cli", str(a.config(), "lark_cli"))
+	ensure(exe != "", "未找到 Lark CLI")
 	// Closing stdin lets Lark unsubscribe cleanly before forced process cleanup.
-	cmd := command(context.WithoutCancel(ctx), exe, "event", "consume", key, "--as", "bot")
+	cmd := command(context.WithoutCancel(ctx), append([]string{exe}, a.larkArgs("event", "consume", key, "--as", "bot")...)...)
 	cmd.Dir = a.Root
 	input, e := cmd.StdinPipe()
 	check(e)
@@ -271,7 +272,10 @@ func (a *App) consume(ctx context.Context, key, name string, handler func(M) boo
 		}
 	}()
 	health := a.data(name + "-health.json")
-	writeJSON(health, M{"state": "starting", "pid": cmd.Process.Pid, "time": stamp()})
+	starting := readMap(health)
+	merge(starting, M{"state": "starting", "pid": cmd.Process.Pid, "time": stamp()})
+	writeJSON(health, starting)
+	var diagnostics strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -281,8 +285,14 @@ func (a *App) consume(ctx context.Context, key, name string, handler func(M) boo
 			sc.Buffer(make([]byte, 65536), 4<<20)
 			for sc.Scan() {
 				line := sc.Text()
+				if diagnostics.Len() > 32768 {
+					kept := diagnostics.String()
+					diagnostics.Reset()
+					diagnostics.WriteString(kept[len(kept)-16384:])
+				}
+				diagnostics.WriteString(line + "\n")
 				if strings.Contains(line, "[event] ready ") {
-					writeJSON(health, M{"state": "ready", "pid": cmd.Process.Pid, "time": stamp()})
+					writeJSON(health, M{"state": "ready", "pid": cmd.Process.Pid, "time": stamp(), "last_ready_at": stamp(), "consecutive_failures": 0})
 				}
 				fmt.Fprintln(os.Stderr, safeError(line))
 			}
@@ -306,12 +316,15 @@ func (a *App) consume(ctx context.Context, key, name string, handler func(M) boo
 	scanErr := scanner.Err()
 	e = cmd.Wait()
 	wg.Wait()
-	writeJSON(health, M{"state": "stopped", "time": stamp()})
 	if ctx.Err() == nil {
 		check(scanErr)
 		if e == nil {
 			e = fmt.Errorf("Lark 事件连接结束")
 		}
-		check(e)
+		panic(fmt.Errorf("%s: %w", safeError(diagnostics.String()), e))
 	}
+	stopped := readMap(health)
+	delete(stopped, "pid")
+	merge(stopped, M{"state": "stopped", "time": stamp()})
+	writeJSON(health, stopped)
 }

@@ -22,7 +22,7 @@ import (
 
 type M = map[string]any
 
-var Version = "0.2.0-alpha.5"
+var Version = "0.2.0-alpha.6"
 var beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 
 type App struct {
@@ -33,6 +33,7 @@ type App struct {
 	Verify   func(M) *School
 	Upload   func(*School, M, string) M
 	CallLark func([]string) M
+	monitor  *daemonMonitor
 }
 
 func New(ctx context.Context, root string) *App {

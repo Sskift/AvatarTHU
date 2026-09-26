@@ -26,7 +26,7 @@ func must(err error) {
 }
 func main() {
 	dest := flag.String("out", "dist", "output directory")
-	version := flag.String("version", "0.2.0-alpha.5", "version without v")
+	version := flag.String("version", "0.2.0-alpha.6", "version without v")
 	targetOS := flag.String("os", runtime.GOOS, "target operating system")
 	targetArch := flag.String("arch", runtime.GOARCH, "target architecture")
 	flag.Parse()

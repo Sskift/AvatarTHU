@@ -79,6 +79,12 @@ func Main(args []string) (code int) {
 		tool := f.String("tool", "", "claude 或 codex")
 		check(f.Parse(args[1:]))
 		a.retryTool(*tool)
+	case "reconnect":
+		ensure(len(args) == 2 && args[1] == "lark", "用法：avatarthu reconnect lark")
+		a.reconnectLark()
+	case "resend":
+		ensure(len(args) == 2, "用法：avatarthu resend 作业编号")
+		a.resendReview(args[1])
 	case "tools":
 		printTools()
 	case "login":
@@ -91,19 +97,20 @@ func Main(args []string) (code int) {
 		f := flag.NewFlagSet("login", flag.ContinueOnError)
 		importOnly := f.Bool("import-only", false, "只导入 macOS Chrome 会话")
 		noStart := f.Bool("no-start", false, "登录飞书后暂不启动后台")
+		profile := f.String("profile", "", "固定使用的 Lark CLI profile，不改变全局默认配置")
 		check(f.Parse(rest))
 		if provider == "thu" {
 			a.loginTHU(*importOnly)
 		} else if provider == "lark" {
 			ensure(!*importOnly, "--import-only 只适用于网络学堂")
-			a.loginLark(*noStart)
+			a.loginLark(*noStart, *profile)
 		} else {
 			panic(fmt.Errorf("登录对象应是 thu 或 lark"))
 		}
 	case "notifications":
 		ensure(len(args) == 2 && (args[1] == "on" || args[1] == "off"), "用法：avatarthu notifications on|off")
 		if args[1] == "on" {
-			a.loginLark(false)
+			a.loginLark(false, "")
 		} else {
 			func() {
 				defer a.lock("settings", true)()
@@ -233,14 +240,26 @@ func (a *App) status() {
 	fmt.Printf("AvatarTHU %s · Go native\n数据目录：%s\n后台服务已注册：%t\n", Version, a.Root, a.serviceLoaded())
 	h := readMap(a.data("daemon-health.json"))
 	fmt.Printf("调度进程：%s PID=%d，更新时间 %s\n", strDefault(h, "state", "未启动"), number(h, "pid", 0), str(h, "time"))
+	if problem := daemonProblem(h, time.Now()); problem != "" {
+		fmt.Println("调度异常：" + problem)
+	}
+	if phase := str(h, "phase"); phase != "" {
+		fmt.Println("当前阶段：" + phase + "；阶段截止：" + str(h, "deadline_at"))
+	}
 	k := readMap(filepath.Join(filepath.Dir(a.session()), "keepalive-status.json"))
 	fmt.Printf("网络学堂：%s · %s\n保活：每 10 分钟；最近检查 %s，最近成功 %s\n", strDefault(k, "state", "尚未检查"), str(k, "message"), str(k, "checked_at"), str(k, "last_success"))
 	fmt.Printf("课程扫描：每 %g 小时；下次 %s\n", float64(number(a.config(), "poll_interval_seconds", 43200))/3600, a.nextScan(readMap(a.data("schedule.json"))).In(beijing).Format(time.RFC3339))
 	fmt.Printf("飞书：%t\n", a.enabled())
+	if profile := str(a.config(), "lark_profile"); profile != "" {
+		fmt.Println("飞书 profile：" + profile)
+	}
 	for _, name := range []string{"actions", "messages"} {
 		if a.enabled() {
 			m := readMap(a.data(name + "-health.json"))
 			fmt.Printf("%s 连接：%s · %s\n", name, strDefault(m, "state", "未启动"), str(m, "time"))
+			if reason := str(m, "reason"); reason != "" {
+				fmt.Printf("  %s；连续失败 %d 次，自 %s\n  %s\n  下次重试：%s；手动重连：avatarthu reconnect lark\n", reason, number(m, "consecutive_failures", 0), str(m, "first_failure_at"), str(m, "action"), str(m, "retry_at"))
+			}
 		}
 	}
 	p := a.pairing()
@@ -269,6 +288,9 @@ func printHelp() {
 
 avatarthu init [--no-login] [--no-start]   安装命令并初始化
 avatarthu login thu|lark                   登录网络学堂；飞书可选
+avatarthu login lark --profile NAME        为本项目选择独立的飞书应用配置
+avatarthu reconnect lark                   重连本项目的飞书监听
+avatarthu resend ID                        补发当前版本作业卡片和审阅文档
 avatarthu configure --mode claude-codex     Claude 主写 / Codex 复审
 avatarthu configure --mode codex-claude     Codex 主写 / Claude 复审
 avatarthu configure --poll-interval 12h     设置课程轮询，保活固定 10 分钟

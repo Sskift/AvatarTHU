@@ -8,11 +8,18 @@ import (
 )
 
 func (a *App) lark(args ...string) M {
+	args = a.larkArgs(args...)
 	if a.CallLark != nil {
 		return a.CallLark(args)
 	}
 	ensure(a.enabled(), "飞书未启用，运行 avatarthu login lark 可启用")
 	return a.cliJSON(findExecutable("lark-cli", str(a.config(), "lark_cli")), args...)
+}
+func (a *App) larkArgs(args ...string) []string {
+	if profile := str(a.config(), "lark_profile"); profile != "" {
+		return append(append([]string{}, args...), "--profile", profile)
+	}
+	return args
 }
 func (a *App) cliJSON(exe string, args ...string) M {
 	out, se, e := capture(a.Ctx, a.Root, 10*time.Minute, append([]string{exe}, args...)...)
@@ -28,6 +35,11 @@ func (a *App) cliJSON(exe string, args ...string) M {
 		panic(fmt.Errorf("Lark CLI 执行失败，请检查登录、网络和权限：%s", safeError(e)))
 	}
 	v := parseMap(out)
+	// Lark management commands return a bare object; API shortcuts wrap data.
+	if _, wrapped := v["ok"]; !wrapped && (len(args) > 0 && args[0] == "whoami" || len(args) > 1 && args[0] == "auth" && args[1] == "status") {
+		ensure(v["error"] == nil, "Lark 身份检查失败")
+		return v
+	}
 	ensure(boolean(v, "ok"), "Lark："+safeError(strDefault(obj(v, "error"), "message", "命令失败，请检查登录或权限")))
 	return obj(v, "data")
 }
@@ -91,7 +103,18 @@ func (a *App) sendNotices(notices []M, markRead func(M)) int {
 	}
 	return count
 }
-func (a *App) loginLark(noStart bool) {
+func (a *App) loginLark(noStart bool, selectedProfile string) {
+	previousConfig := a.config()
+	profile := selectedProfile
+	if profile == "" {
+		profile = str(previousConfig, "lark_profile")
+	}
+	profileArgs := func(args ...string) []string {
+		if profile != "" {
+			args = append(args, "--profile", profile)
+		}
+		return args
+	}
 	exe := findExecutable("lark-cli", str(a.config(), "lark_cli"))
 	if exe == "" {
 		npm := findExecutable("npm", "")
@@ -103,39 +126,84 @@ func (a *App) loginLark(noStart bool) {
 		ensure(exe != "", "未找到新安装的 Lark CLI")
 	}
 	status := M{}
-	_ = attempt(func() { status = a.cliJSON(exe, "auth", "status", "--json", "--verify") })
+	statusErr := attempt(func() { status = a.cliJSON(exe, profileArgs("auth", "status", "--json", "--verify")...) })
+	if selectedProfile != "" && statusErr != nil {
+		panic(statusErr)
+	}
 	if str(status, "appId") == "" {
+		ensure(profile == "", "指定的 Lark profile 未配置，请先用 lark-cli profile list 检查")
 		interactive(a.Ctx, a.Root, exe, "config", "init", "--new")
 		status = a.cliJSON(exe, "auth", "status", "--json", "--verify")
 	}
 	identity := obj(obj(status, "identities"), "user")
 	if !boolean(identity, "available") {
-		interactive(a.Ctx, a.Root, exe, "auth", "login", "--domain", "docs,drive,im,event")
+		interactive(a.Ctx, a.Root, append([]string{exe}, profileArgs("auth", "login", "--domain", "docs,drive,im")...)...)
 	}
 	var who M
-	e := attempt(func() { who = a.cliJSON(exe, "whoami", "--as", "user", "--json") })
+	e := attempt(func() { who = a.cliJSON(exe, profileArgs("whoami", "--as", "user", "--json")...) })
 	if e != nil {
 		fmt.Println("已存飞书登录暂不可用，重新授权。 ")
-		interactive(a.Ctx, a.Root, exe, "auth", "login", "--domain", "docs,drive,im,event")
-		who = a.cliJSON(exe, "whoami", "--as", "user", "--json")
+		interactive(a.Ctx, a.Root, append([]string{exe}, profileArgs("auth", "login", "--domain", "docs,drive,im")...)...)
+		who = a.cliJSON(exe, profileArgs("whoami", "--as", "user", "--json")...)
 	}
 	owner := str(obj(who, "onBehalfOf"), "openId")
 	ensure(owner != "", "飞书未返回本人身份，配置未更改")
+	if profile == "" {
+		profile = str(who, "profile")
+	}
 	for _, key := range []string{"card.action.trigger", "im.message.receive_v1"} {
-		a.cliJSON(exe, "event", "consume", key, "--as", "bot", "--dry-run")
+		a.cliJSON(exe, profileArgs("event", "consume", key, "--as", "bot", "--dry-run")...)
 	}
 	func() {
 		defer a.lock("settings", true)()
 		cfg := a.config()
 		previous := str(cfg, "lark_user_id")
-		ensure(previous == "" || previous == owner || len(a.tasks()) == 0, "飞书账号与已有作业的审阅人不同，请切回原账号")
-		merge(cfg, M{"lark_enabled": true, "lark_cli": exe, "lark_user_id": owner})
+		// open_id is application-scoped. An explicit new profile binds its own
+		// authenticated owner; old cards remain tied to their original app/message.
+		explicitSwitch := selectedProfile != "" && selectedProfile != str(cfg, "lark_profile")
+		ensure(previous == "" || previous == owner || len(a.tasks()) == 0 || explicitSwitch, "飞书账号与已有作业的审阅人不同，请切回原账号")
+		merge(cfg, M{"lark_enabled": true, "lark_cli": exe, "lark_user_id": owner, "lark_profile": profile})
 		a.saveConfig(cfg)
 	}()
 	if !noStart {
 		a.serviceStart()
 	}
 	fmt.Println("飞书已启用，审阅文档和卡片会发给本人。")
+}
+
+// Resend only a frozen review. Persist the send intent before contacting Feishu,
+// and keep old receipts; a transport retry reuses the same idempotency key.
+func (a *App) resendReview(tid string) {
+	defer a.lock(tid, true)()
+	st := readMap(a.taskPath(tid))
+	ensure(str(st, "status") == "awaiting" || str(st, "status") == "needs_student", "只有已完成、待审阅的作业可以补发通知")
+	ensure(a.enabled(), "飞书未启用")
+	review := a.publishCloud(st)
+	ensure(boolean(review, "verified") && str(review, "url") != "", "当前版本审阅文档尚未发布完成")
+	a.lark("docs", "+fetch", "--as", "user", "--doc", str(review, "url"), "--scope", "outline")
+	request := obj(st, "resend_request")
+	if str(request, "id") == "" || request["receipt"] != nil || number(request, "revision", -1) != number(st, "revision", 0) || str(request, "profile") != str(a.config(), "lark_profile") {
+		request = M{"id": randomID(16), "requested_at": stamp(), "revision": st["revision"], "profile": str(a.config(), "lark_profile")}
+		st["resend_request"] = request
+		a.saveTask(st)
+	}
+	card := assignmentCard(st)
+	if str(readMap(a.data("actions-health.json")), "state") != "ready" || str(readMap(a.data("messages-health.json")), "state") != "ready" {
+		body := obj(card, "body")
+		body["elements"] = append([]M{md("**连接提示：**回调尚未就绪。现在可以打开审阅文档；提交和修改按钮请等菜单栏显示飞书已连接后再操作。")}, objects(body["elements"])...)
+	}
+	receipt := a.send(card, "resend:"+str(request, "id"))
+	history := objects(st["card_history"])
+	if old := obj(obj(st, "deliveries"), "card"); len(old) > 0 {
+		history = append(history, old)
+	}
+	st["card_history"] = history
+	deliveries := obj(st, "deliveries")
+	deliveries["card"] = receipt
+	merge(st, M{"deliveries": deliveries, "card_message_id": receipt["message_id"], "chat_id": receipt["chat_id"]})
+	merge(request, M{"receipt": receipt, "sent_at": stamp(), "profile": str(a.config(), "lark_profile")})
+	a.saveTask(st)
+	fmt.Println("已补发当前版本作业卡片，附最新审阅文档：" + str(review, "url"))
 }
 func (a *App) deliver(st M) {
 	a.publishLocal(st)

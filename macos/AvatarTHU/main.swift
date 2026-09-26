@@ -115,6 +115,7 @@ func dataRoot() -> URL {
 
 struct Snapshot {
     var running = false
+    var schedulerProblem = ""
     var pid: Int32 = 0
     var school = "尚未检查"
     var schoolOK = false
@@ -126,6 +127,7 @@ struct Snapshot {
     var actions = false
     var messages = false
     var larkCLI = Indicator(state: "off", text: "未启用 · 本地审阅")
+    var larkDetails = ""
     var claude = Indicator(state: "unknown", text: "尚未检查")
     var codex = Indicator(state: "unknown", text: "尚未检查")
     var cliCheckedAt: Date?
@@ -156,7 +158,7 @@ struct Snapshot {
 
     var kind: String {
         if !running { return "stopped" }
-        if !schoolOK || attention > 0 || (lark && (!actions || !messages)) || claude.state == "error" || codex.state == "error" { return "attention" }
+        if !schedulerProblem.isEmpty || !schoolOK || attention > 0 || (lark && (!actions || !messages)) || claude.state == "error" || codex.state == "error" { return "attention" }
         return busy > 0 ? "busy" : "running"
     }
     var headline: String {
@@ -174,6 +176,13 @@ struct Snapshot {
         let health = readObject(root.appendingPathComponent("data/daemon-health.json"))
         s.pid = (health["pid"] as? NSNumber)?.int32Value ?? 0
         s.running = health["state"] as? String == "running" && processAlive(s.pid, executable: root.appendingPathComponent("bin/avatarthu"))
+        if s.running, (health["heartbeat_interval_seconds"] as? Int ?? 0) > 0 {
+            if let heartbeat = dateValue(health["time"]), (-60...90).contains(now.timeIntervalSince(heartbeat)) {
+                if let deadline = dateValue(health["deadline_at"]), now > deadline {
+                    s.schedulerProblem = "调度阶段超时：\(health["phase"] as? String ?? "未知阶段")"
+                }
+            } else { s.schedulerProblem = "后台心跳未更新" }
+        }
         s.version = health["version"] as? String ?? ""
         s.configuredMode = config["review_mode"] as? String ?? "claude-codex"
         for tool in ["claude", "codex"] { s.executions[tool] = readObject(root.appendingPathComponent("data/\(tool)-execution.json")) }
@@ -182,7 +191,7 @@ struct Snapshot {
         s.lastSuccess = dateValue(keepalive["last_success"])
         switch keepalive["state"] as? String {
         case "valid":
-            s.schoolOK = s.lastSuccess.map { now.timeIntervalSince($0) < 15 * 60 } ?? false
+            s.schoolOK = s.lastSuccess.map { (-60..<900).contains(now.timeIntervalSince($0)) } ?? false
             s.school = s.schoolOK ? "登录有效" : "保活记录待更新"
         case "expired": s.school = "登录已过期 · 请重新登录"
         case "unavailable": s.school = "暂时无法连接"
@@ -206,15 +215,26 @@ struct Snapshot {
         }
         s.actions = listener("actions")
         s.messages = listener("messages")
+        let listenerHealth = ["actions", "messages"].map { readObject(root.appendingPathComponent("data/\($0)-health.json")) }
+        let failures = listenerHealth.filter { $0["state"] as? String != "ready" && !($0["reason"] as? String ?? "").isEmpty }
+        s.larkDetails = zip(["卡片回调", "消息监听"], listenerHealth).map { name, value in
+            let count = (value["consecutive_failures"] as? Int) ?? 0
+            let reason = value["reason"] as? String ?? (value["state"] as? String ?? "尚未连接")
+            let action = value["action"] as? String ?? ""
+            return "\(name)：\(reason)\n连续失败：\(count) 次\n首次失败：\(value["first_failure_at"] as? String ?? "无")\n下次重试：\(value["retry_at"] as? String ?? "无")\n\(action)"
+        }.joined(separator: "\n\n")
+        s.larkDetails += "\n\nProfile：\(config["lark_profile"] as? String ?? "Lark CLI 默认配置")\n手动重连：avatarthu reconnect lark\n详细日志：\(root.appendingPathComponent("logs/daemon.log").path)"
         if s.lark {
             if s.actions && s.messages {
                 s.larkCLI = Indicator(state: "ready", text: "卡片 / 消息已连接")
             } else if !s.running {
                 s.larkCLI = Indicator(state: "off", text: "后台已停止 · 连接已停")
+            } else if let failure = failures.first {
+                s.larkCLI = Indicator(state: "error", text: failure["reason"] as? String ?? "飞书连接异常")
             } else {
                 s.larkCLI = Indicator(state: "unknown", text: s.actions || s.messages ? "部分连接中断" : "等待连接 / 重连")
             }
-            s.larkCLI.detail = "飞书卡片回调：\(s.actions ? "已连接" : "未连接")\n消息监听：\(s.messages ? "已连接" : "未连接")"
+            s.larkCLI.detail = "飞书卡片回调：\(s.actions ? "已连接" : "未连接")\n消息监听：\(s.messages ? "已连接" : "未连接")\n\n\(s.larkDetails)"
         }
         let taskURLs = (try? FileManager.default.contentsOfDirectory(at: root.appendingPathComponent("data/tasks"), includingPropertiesForKeys: nil)) ?? []
         for url in taskURLs where url.pathExtension == "json" {
@@ -237,7 +257,7 @@ struct Snapshot {
 
     var diagnostic: Object {
         // Deliberately exclude account IDs, task text, document URLs and credentials.
-        return ["state": kind, "daemon_running": running, "pid": pid, "school": school,
+        return ["state": kind, "daemon_running": running, "scheduler_problem": schedulerProblem, "pid": pid, "school": school,
                 "school_valid": schoolOK, "poll_interval_seconds": pollSeconds,
                 "lark_enabled": lark, "actions_ready": actions, "messages_ready": messages,
                 "indicators": ["lark_cli": larkCLI.state, "learn": learn.state, "claude": claude.state, "codex": codex.state],
@@ -449,6 +469,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let heading = row("AvatarTHU")
         heading.attributedTitle = NSAttributedString(string: "AvatarTHU", attributes: [.font: NSFont.systemFont(ofSize: 15, weight: .semibold), .foregroundColor: NSColor.labelColor])
         row(snapshot.headline + (snapshot.running ? " · PID \(snapshot.pid)" : ""))
+        if !snapshot.schedulerProblem.isEmpty { row(snapshot.schedulerProblem + "…", action: #selector(showStatus), symbol: "exclamationmark.triangle") }
         if snapshot.activeModes.contains(where: { $0 != snapshot.configuredMode }) {
             for mode in snapshot.activeModes { row("当前作业 · \(Snapshot.modeText(mode))") }
             row("后续版本 · \(snapshot.modeText)")
@@ -458,6 +479,10 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         indicatorRow("Learn · 网络学堂", snapshot.learn)
         indicatorRow("Claude", snapshot.claude)
         indicatorRow("Codex", snapshot.codex)
+        if snapshot.lark && (!snapshot.actions || !snapshot.messages) {
+            row("飞书连接异常详情…", action: #selector(showLarkFailure), symbol: "exclamationmark.bubble")
+            row("重连飞书", action: #selector(reconnectLark), symbol: "arrow.clockwise")
+        }
         for tool in ["claude", "codex"] {
             guard let failure = snapshot.executions[tool], failure["state"] as? String == "failed" else { continue }
             let title = tool == "claude" ? "Claude" : "Codex"
@@ -504,6 +529,8 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openCourses() { NSWorkspace.shared.open(root.appendingPathComponent("courses")) }
     @objc func openLog() { NSWorkspace.shared.open(root.appendingPathComponent("logs/daemon.log")) }
+    @objc func showLarkFailure() { showText("飞书连接状态", snapshot.larkDetails) }
+    @objc func reconnectLark() { execute(["reconnect", "lark"], title: "重连飞书", openingText: "正在请求后台重连本项目的监听；连接成功后指示灯恢复绿色。") }
     @objc func showFailure(_ sender: NSMenuItem) {
         guard let tool = sender.representedObject as? String, let failure = snapshot.executions[tool] else { return }
         let role = failure["phase"] as? String == "reviewer" ? "独立复审" : (failure["phase"] as? String == "writer" ? "主写" : "启动检查")

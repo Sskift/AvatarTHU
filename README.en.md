@@ -298,6 +298,19 @@ Local-only mode creates an HTML review page with the same sections. Run `avatart
 
 ## Execution errors and recovery
 
+The menu bar and `avatarthu status` show the reason for a failed Feishu connection, consecutive failures, and the next retry time. App connection conflicts, authorization, permissions, and CLI version errors retry every 15 minutes. Temporary disconnections back off through 1, 2, 4, 8, and 15 minutes. Open “飞书连接异常详情” for details, then choose “重连飞书” or run `avatarthu reconnect lark` after resolving the cause. The error remains visible until the listener actually becomes ready.
+
+If another program or device already listens on the same Feishu app, stop that listener or select a Lark CLI profile for a different app:
+
+```sh
+lark-cli profile list
+avatarthu login lark --profile my-avatar
+```
+
+Use an existing profile name; app secrets stay in Lark CLI's credential storage. AvatarTHU pins the selected profile and its authenticated owner without changing the global CLI default. After switching apps, `avatarthu resend TASK_ID` sends the current review card with the latest review document. The previous card can no longer submit that version, and its receipt is preserved. Retrying a failed resend reuses the pending send request to avoid duplicate messages.
+
+The daemon writes a local heartbeat every 15 seconds. A heartbeat older than 90 seconds or an overdue scheduler stage produces an alert. Model stages use their configured timeout so normal long writing or review runs are not mistaken for a stalled scheduler. Alerts do not automatically restart the daemon or retry homework submissions. School keepalive remains every 10 minutes in the same Go process.
+
 Authentication, quota/rate limits, incompatible CLI versions, permissions, and default configuration errors pause automatic retries for the affected tool. Temporary network errors and timeouts retry after 15 minutes. After fixing the account or environment, choose “检查并恢复” (Check and resume) in the menu, or run:
 
 ```sh

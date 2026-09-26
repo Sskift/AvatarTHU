@@ -35,6 +35,7 @@ func TestMenubarSnapshot(t *testing.T) {
 		{"healthy", "running"}, {"working", "busy"}, {"expired", "attention"},
 		{"stale_keepalive", "attention"}, {"stale_pid", "stopped"},
 		{"wrong_executable", "stopped"}, {"dead_listener", "attention"},
+		{"stale_heartbeat", "attention"}, {"stuck_scheduler", "attention"}, {"long_model", "running"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a := testApp(t)
@@ -45,6 +46,15 @@ func TestMenubarSnapshot(t *testing.T) {
 				check(os.Symlink(executable, a.installedBinary()))
 			}
 			health := M{"state": "running", "pid": os.Getpid()}
+			if test.name == "stale_heartbeat" || test.name == "stuck_scheduler" || test.name == "long_model" {
+				merge(health, M{"heartbeat_interval_seconds": 15, "time": stamp(), "deadline_at": time.Now().Add(time.Hour).Format(time.RFC3339), "phase": "claude writer"})
+				if test.name == "stale_heartbeat" {
+					health["time"] = time.Now().Add(-5 * time.Minute).Format(time.RFC3339)
+				}
+				if test.name == "stuck_scheduler" {
+					health["deadline_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339)
+				}
+			}
 			keepalive := M{"state": "valid", "last_success": stamp()}
 			if test.name == "stale_pid" {
 				health["pid"] = 2147483647
@@ -86,7 +96,7 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 	if binary == "" {
 		t.Skip("set AVATARTHU_MENUBAR_TEST_BINARY to test the compiled AppKit monitor")
 	}
-	for _, name := range []string{"all_ready", "codex_login_failed", "stale_cli", "missing_cli", "partial_lark", "lark_disabled", "learn_expired", "runtime_quota", "requested_retry", "recovered", "active_mode"} {
+	for _, name := range []string{"all_ready", "codex_login_failed", "stale_cli", "missing_cli", "partial_lark", "lark_conflict", "lark_retrying", "lark_disabled", "learn_expired", "runtime_quota", "requested_retry", "recovered", "active_mode"} {
 		t.Run(name, func(t *testing.T) {
 			a := testApp(t)
 			mkdir(filepath.Join(a.Root, "bin"))
@@ -122,6 +132,13 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 				want["codex"] = "unknown"
 			case "partial_lark":
 				want["lark_cli"] = "unknown"
+			case "lark_conflict", "lark_retrying":
+				state := "failed"
+				if name == "lark_retrying" {
+					state = "starting"
+				}
+				writeJSON(a.data("actions-health.json"), M{"state": state, "reason": "飞书应用连接冲突", "category": "conflict", "consecutive_failures": 3})
+				want["lark_cli"] = "error"
 			case "lark_disabled":
 				want["lark_cli"] = "off"
 			case "learn_expired":

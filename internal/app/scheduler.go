@@ -83,7 +83,7 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 	success := true
 	schedule := readMap(a.data("schedule.json"))
 	if !tick || !time.Now().Before(a.nextScan(schedule)) {
-		e := attempt(a.syncCourses)
+		e := attempt(func() { defer a.stage("课程同步", 30*time.Minute)(); a.syncCourses() })
 		if e == nil {
 			writeJSON(a.data("schedule.json"), M{"last_sync_at": stamp()})
 		} else {
@@ -108,6 +108,7 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 			continue
 		}
 		func() {
+			defer a.stage("作业处理", 30*time.Minute)()
 			defer a.lock(tid, true)()
 			st := readMap(a.taskPath(tid))
 			status := str(st, "status")
@@ -185,13 +186,15 @@ func (a *App) startListeners(parent context.Context) func() {
 			}
 			for ctx.Err() == nil {
 				e := attempt(func() { a.consume(ctx, key, name, handler) })
+				delay := time.Minute
 				if e != nil && ctx.Err() == nil {
+					delay = a.listenerFailed(name, e)
 					fmt.Fprintln(os.Stderr, safeError(e))
 				}
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(time.Minute):
+				case <-time.After(delay):
 				}
 			}
 		}()
@@ -208,7 +211,7 @@ func (a *App) eventManager(ctx context.Context) {
 		key := ""
 		if a.enabled() {
 			cfg := a.config()
-			key = str(cfg, "lark_cli") + ":" + str(cfg, "lark_user_id")
+			key = str(cfg, "lark_cli") + ":" + str(cfg, "lark_user_id") + ":" + str(cfg, "lark_profile") + ":" + str(readMap(a.data("lark-reconnect.json")), "request_id")
 		}
 		if key != activeKey {
 			stop()
@@ -230,7 +233,10 @@ func (a *App) daemon() {
 	ctx, cancel := context.WithCancel(a.Ctx)
 	defer cancel()
 	var workers sync.WaitGroup
-	workers.Add(2)
+	a.monitor = &daemonMonitor{app: a, phase: "等待调度", started: time.Now(), deadline: time.Now().Add(3 * time.Minute)}
+	a.monitor.beat()
+	workers.Add(3)
+	go func() { defer workers.Done(); a.monitor.loop(ctx) }()
 	go func() { defer workers.Done(); a.eventManager(ctx) }()
 	go func() { defer workers.Done(); a.maintenanceLoop(ctx) }()
 	defer func() {
@@ -239,8 +245,7 @@ func (a *App) daemon() {
 		writeJSON(a.data("daemon-health.json"), M{"state": "stopped", "pid": os.Getpid(), "time": stamp()})
 	}()
 	for {
-		writeJSON(a.data("daemon-health.json"), M{"state": "running", "pid": os.Getpid(), "time": stamp(), "version": Version})
-		if e := attempt(func() { a.runScheduled() }); e != nil {
+		if e := attempt(func() { defer a.stage("运行调度", 3*time.Minute)(); a.runScheduled() }); e != nil {
 			fmt.Fprintln(os.Stderr, safeError(e))
 		}
 		select {

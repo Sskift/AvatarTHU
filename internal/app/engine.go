@@ -46,6 +46,7 @@ func modelEnv() []string {
 	return append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1")
 }
 func (a *App) engine(executor, job, prompt string, schema M, role string, plan M) M {
+	defer a.stage(executor+" "+role, time.Duration(number(plan, "stage_timeout", 7200))*time.Second+2*time.Minute)()
 	defer a.lock("model-worker", false)()
 	defer func() {
 		if value := recover(); value != nil {
