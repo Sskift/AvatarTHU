@@ -134,7 +134,7 @@ func jsonBytes(v any) []byte {
 func writeJSON(p string, v any) {
 	// Keep unchanged legacy bytes: courseware index files participate in the
 	// material hash. A formatting-only rewrite must not invalidate old cards.
-	if old, err := os.ReadFile(p); err == nil {
+	if old, err := readStateFile(p); err == nil {
 		var decoded any
 		if json.Unmarshal(old, &decoded) == nil && bytes.Equal(jsonBytes(decoded), jsonBytes(v)) {
 			return

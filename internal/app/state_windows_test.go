@@ -33,7 +33,9 @@ func TestStateSurvivesTemporaryWindowsSharingConflict(t *testing.T) {
 					t.Fatal(got)
 				}
 			} else {
-				writeJSON(p, M{"state": "ready"})
+				tmp := filepath.Join(filepath.Dir(p), "replacement.json")
+				check(os.WriteFile(tmp, []byte(`{"state":"ready"}`), 0600))
+				check(replaceFile(tmp, p))
 				if got := str(readMap(p), "state"); got != "ready" {
 					t.Fatal(got)
 				}
