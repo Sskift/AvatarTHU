@@ -166,7 +166,7 @@ Once the service is running, you can close the terminal and the agent that insta
 
 ## Copy a setup prompt for your agent
 
-Copy this entire block to an agent with access to your local terminal, such as Claude Code or Codex. Use the code block's copy button, and optionally edit the three preferences first. The agent can download, install, check, configure, and start AvatarTHU. **You still complete school login, QR scans, two-factor authentication, and system authorization yourself.**
+Copy this entire block to an agent with access to your local terminal, such as Claude Code or Codex. Use the code block's copy button, and optionally edit the preferences below first. The agent can download, install, check, configure, and start AvatarTHU. **You still complete school login, QR scans, two-factor authentication, and system authorization yourself.**
 
 ```text
 Install and configure AvatarTHU on this computer. Perform the setup rather than only giving instructions.
