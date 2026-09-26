@@ -25,3 +25,5 @@ func bindProcess(cmd *exec.Cmd) func() {
 	}
 }
 func replaceFile(src, dst string) error { return os.Rename(src, dst) }
+
+func readStateFile(p string) ([]byte, error) { return os.ReadFile(p) }

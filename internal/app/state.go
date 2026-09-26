@@ -114,7 +114,7 @@ func fileLock(p string, block bool) func() {
 	return func() { check(l.Unlock()) }
 }
 func readMap(p string) M {
-	b, e := os.ReadFile(p)
+	b, e := readStateFile(p)
 	if os.IsNotExist(e) {
 		return M{}
 	}

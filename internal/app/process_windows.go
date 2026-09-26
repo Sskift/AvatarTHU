@@ -1,10 +1,14 @@
 package app
 
 import (
-	"golang.org/x/sys/windows"
+	"errors"
+	"os"
 	"os/exec"
 	"syscall"
+	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func setupProcess(cmd *exec.Cmd) {
@@ -48,5 +52,29 @@ func replaceFile(src, dst string) error {
 	if e != nil {
 		return e
 	}
-	return windows.MoveFileEx(a, b, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	return retrySharedFile(func() error {
+		return windows.MoveFileEx(a, b, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	})
+}
+
+// Windows briefly denies opens or replacement while another process has a
+// conflicting handle. Retry only sharing/lock conflicts, not permission errors.
+func retrySharedFile(op func() error) error {
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := op()
+		if (!errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_LOCK_VIOLATION)) || !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func readStateFile(p string) (b []byte, err error) {
+	err = retrySharedFile(func() error {
+		var e error
+		b, e = os.ReadFile(p)
+		return e
+	})
+	return
 }
