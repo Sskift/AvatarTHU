@@ -54,16 +54,18 @@ func replaceFile(src, dst string) error {
 	}
 	return retrySharedFile(func() error {
 		return windows.MoveFileEx(a, b, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
-	})
+	}, true)
 }
 
 // Windows briefly denies opens or replacement while another process has a
-// conflicting handle. Retry only sharing/lock conflicts, not permission errors.
-func retrySharedFile(op func() error) error {
+// conflicting handle. MoveFileEx may report ACCESS_DENIED for an open target;
+// persistent errors are returned after the bounded retry without changing ACLs.
+func retrySharedFile(op func() error, replacing bool) error {
 	deadline := time.Now().Add(time.Second)
 	for {
 		err := op()
-		if (!errors.Is(err, windows.ERROR_SHARING_VIOLATION) && !errors.Is(err, windows.ERROR_LOCK_VIOLATION)) || !time.Now().Before(deadline) {
+		retry := errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION) || (replacing && errors.Is(err, windows.ERROR_ACCESS_DENIED))
+		if !retry || !time.Now().Before(deadline) {
 			return err
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -75,6 +77,6 @@ func readStateFile(p string) (b []byte, err error) {
 		var e error
 		b, e = os.ReadFile(p)
 		return e
-	})
+	}, false)
 	return
 }
