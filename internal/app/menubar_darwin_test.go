@@ -96,7 +96,7 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 	if binary == "" {
 		t.Skip("set AVATARTHU_MENUBAR_TEST_BINARY to test the compiled AppKit monitor")
 	}
-	for _, name := range []string{"all_ready", "codex_login_failed", "stale_cli", "missing_cli", "partial_lark", "lark_conflict", "lark_retrying", "lark_disabled", "learn_expired", "runtime_quota", "requested_retry", "recovered", "active_mode"} {
+	for _, name := range []string{"all_ready", "codex_login_failed", "stale_cli", "missing_cli", "partial_lark", "lark_conflict", "lark_retrying", "lark_disabled", "learn_expired", "runtime_quota", "requested_retry", "recovered", "active_mode", "claude_only", "codex_only", "active_other_harness"} {
 		t.Run(name, func(t *testing.T) {
 			a := testApp(t)
 			mkdir(filepath.Join(a.Root, "bin"))
@@ -155,6 +155,18 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 			case "active_mode":
 				a.saveConfig(M{"lark_enabled": true, "review_mode": "codex-claude"})
 				writeJSON(a.taskPath("0123456789abcdef"), M{"status": "reviewing", "execution_plan": M{"mode": "claude-codex"}})
+			case "claude_only", "codex_only", "active_other_harness":
+				selected, unused := "claude", "codex"
+				if name == "codex_only" {
+					selected, unused = "codex", "claude"
+				}
+				a.saveConfig(M{"lark_enabled": true, "review_mode": "codex-claude", "writer_harness": selected, "reviewer_harness": selected})
+				writeJSON(a.data(unused+"-execution.json"), M{"state": "failed", "reason": "旧配置额度不足"})
+				want[unused] = "off"
+				if name == "active_other_harness" {
+					writeJSON(a.taskPath("0123456789abcdef"), M{"status": "reviewing", "execution_plan": M{"writer": "codex", "reviewer": "claude"}})
+					want[unused] = "error"
+				}
 			}
 			writeJSON(a.data("cli-health.json"), records)
 			out, e := exec.Command(binary, "--home", a.Root, "--snapshot").CombinedOutput()
@@ -170,6 +182,12 @@ func TestMenubarIndependentIndicators(t *testing.T) {
 			}
 			if name == "active_mode" && (str(result, "review_mode") != "codex-claude" || len(texts(result["active_review_modes"])) != 1 || texts(result["active_review_modes"])[0] != "claude-codex") {
 				t.Fatalf("lost running version's pairing: %s", out)
+			}
+			if name == "claude_only" && (str(result, "harness_label") != "主写 Claude · 复审 Claude" || str(result, "state") != "running") {
+				t.Fatal(result)
+			}
+			if name == "codex_only" && (str(result, "harness_label") != "主写 Codex · 复审 Codex" || str(result, "state") != "running") {
+				t.Fatal(result)
 			}
 		})
 	}

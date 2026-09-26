@@ -70,8 +70,8 @@ func TestLegacyFingerprint(t *testing.T) {
 		t.Fatal("format-only rewrite changed legacy material hash")
 	}
 }
-func TestWorkflowBothModesRejectThenApprove(t *testing.T) {
-	for _, mode := range []string{"claude-codex", "codex-claude"} {
+func TestWorkflowAllHarnessPairsRejectThenApprove(t *testing.T) {
+	for _, mode := range []string{"claude-codex", "codex-claude", "claude-claude", "codex-codex"} {
 		t.Run(mode, func(t *testing.T) {
 			a := testApp(t)
 			cfg := a.config()
@@ -87,6 +87,13 @@ func TestWorkflowBothModesRejectThenApprove(t *testing.T) {
 				folders[job] = true
 				if role == "writer" {
 					writers++
+					if writers == 1 {
+						// Changing defaults mid-version must not redirect its review
+						// or later rewrite to a different harness.
+						cfg := a.config()
+						merge(cfg, M{"writer_harness": "codex", "reviewer_harness": "codex"})
+						a.saveConfig(cfg)
+					}
 					if engine != strings.Split(mode, "-")[0] {
 						t.Fatal("wrong writer")
 					}

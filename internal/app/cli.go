@@ -68,8 +68,12 @@ func Main(args []string) (code int) {
 	case "doctor":
 		okay := true
 		for _, r := range a.inspectPair(a.pairing()) {
-			fmt.Printf("%s：%s %s\n  %s\n", str(r, "tool"), str(r, "reason"), str(r, "version"), str(r, "action"))
-			okay = okay && boolean(r, "usable")
+			usage := "当前分工需要"
+			if !boolean(r, "required") {
+				usage = "当前分工未选用"
+			}
+			fmt.Printf("%s（%s）：%s %s\n  %s\n", str(r, "tool"), usage, str(r, "reason"), str(r, "version"), str(r, "action"))
+			okay = okay && (!boolean(r, "required") || boolean(r, "usable"))
 		}
 		if !okay {
 			return 1
@@ -201,14 +205,29 @@ func duration(raw string) int {
 }
 func (a *App) configure(args []string) {
 	f := flag.NewFlagSet("configure", flag.ContinueOnError)
-	mode := f.String("mode", "", "claude-codex 或 codex-claude")
+	mode := f.String("mode", "", "兼容旧版：主写-复审，如 claude-codex")
+	writer := f.String("writer", "", "主写 harness：claude 或 codex")
+	reviewer := f.String("reviewer", "", "复审 harness：claude 或 codex")
 	poll := f.String("poll-interval", "", "30m、12h、1d")
 	rounds := f.Int("max-review-rounds", -1, "每版最多复审轮数，0 为不限")
 	check(f.Parse(args))
+	ensure(f.NArg() == 0, "configure 不接受位置参数，请用 --writer / --reviewer 选择 harness")
+	rolesChanged := false
+	f.Visit(func(v *flag.Flag) {
+		if v.Name == "writer" {
+			ensure(validHarness(*writer), "主写 harness 只支持 claude 或 codex")
+			rolesChanged = true
+		}
+		if v.Name == "reviewer" {
+			ensure(validHarness(*reviewer), "复审 harness 只支持 claude 或 codex")
+			rolesChanged = true
+		}
+	})
 	changes := M{}
 	if *mode != "" {
-		ensure(*mode == "claude-codex" || *mode == "codex-claude", "只支持 claude-codex 或 codex-claude")
-		changes["review_mode"] = *mode
+		ensure(!rolesChanged, "--mode 不能与 --writer / --reviewer 混用")
+		*writer, *reviewer = configuredHarnesses(M{"review_mode": *mode})
+		rolesChanged = true
 	}
 	if *poll != "" {
 		changes["poll_interval_seconds"] = duration(*poll)
@@ -222,7 +241,21 @@ func (a *App) configure(args []string) {
 	func() {
 		defer a.lock("settings", true)()
 		cfg := a.config()
+		if rolesChanged {
+			// Fill only the unchanged role from the previous configuration.
+			roles := M{}
+			merge(roles, cfg)
+			if *writer != "" {
+				roles["writer_harness"] = *writer
+			}
+			if *reviewer != "" {
+				roles["reviewer_harness"] = *reviewer
+			}
+			w, r := configuredHarnesses(roles)
+			merge(changes, M{"writer_harness": w, "reviewer_harness": r, "review_mode": w + "-" + r})
+		}
 		merge(cfg, changes)
+		configuredHarnesses(cfg)
 		for _, tool := range []string{"claude", "codex"} {
 			if p := findExecutable(tool, ""); p != "" {
 				cfg[tool+"_cli"] = p
@@ -233,7 +266,7 @@ func (a *App) configure(args []string) {
 	p := a.pairing()
 	fmt.Printf("主写：%s；复审：%s；分别使用各自 CLI 默认模型。\n课程轮询：每 %g 小时；同一进程每 10 分钟保活。\n每版复审上限：%d（0 为不限）。\n", str(p, "writer"), str(p, "reviewer"), float64(number(a.config(), "poll_interval_seconds", 43200))/3600, number(p, "max_review_rounds", 3))
 	if len(changes) > 0 {
-		fmt.Println("设置已保存；轮询下一次调度生效，复审分工从下一版作业开始。")
+		fmt.Println("设置已保存；轮询下一次调度生效，主写和复审 harness 从下一版作业开始，当前版本保留原分工。")
 	}
 }
 func (a *App) status() {
@@ -291,8 +324,8 @@ avatarthu login thu|lark                   登录网络学堂；飞书可选
 avatarthu login lark --profile NAME        为本项目选择独立的飞书应用配置
 avatarthu reconnect lark                   重连本项目的飞书监听
 avatarthu resend ID                        补发当前版本作业卡片和审阅文档
-avatarthu configure --mode claude-codex     Claude 主写 / Codex 复审
-avatarthu configure --mode codex-claude     Codex 主写 / Claude 复审
+avatarthu configure --writer claude --reviewer codex  分别选择主写和复审 harness
+avatarthu configure --reviewer claude      只更换复审 harness；两角色均可选 claude/codex
 avatarthu configure --poll-interval 12h     设置课程轮询，保活固定 10 分钟
 avatarthu configure --max-review-rounds 3   复审不通过自动重写，0 表示不限
 avatarthu service start|stop|status         管理后台进程

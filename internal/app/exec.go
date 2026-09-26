@@ -224,6 +224,9 @@ func (a *App) probe(tool, path string) M {
 }
 func (a *App) inspectPair(plan M) []M {
 	r := []M{a.probe("claude", str(plan, "claude_cli")), a.probe("codex", str(plan, "codex_cli"))}
+	for _, result := range r {
+		result["required"] = usesHarness(plan, str(result, "tool"))
+	}
 	writeJSON(a.data("cli-health.json"), r)
 	return r
 }
@@ -233,7 +236,7 @@ func (a *App) requirePair(plan M) {
 	}
 	var first error
 	for _, r := range a.inspectPair(plan) {
-		if !boolean(r, "usable") {
+		if boolean(r, "required") && !boolean(r, "usable") {
 			failure := &toolFailure{Tool: str(r, "tool"), Category: str(r, "category"), Reason: str(r, "reason"), Action: str(r, "action"), Retryable: boolean(r, "retryable")}
 			a.recordToolFailure(failure, "preflight", "")
 			if first == nil {

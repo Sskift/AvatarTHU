@@ -143,17 +143,28 @@ struct Snapshot {
     var version = ""
 
     static func modeText(_ mode: String) -> String {
-        switch mode {
-        case "claude-codex": return "主写 Claude · 复审 Codex"
-        case "codex-claude": return "主写 Codex · 复审 Claude"
-        default: return "分工配置待检查"
-        }
+        let parts = mode.split(separator: "-").map(String.init)
+        guard parts.count == 2, parts.allSatisfy({ ["claude", "codex"].contains($0) }) else { return "分工配置待检查" }
+        return "主写 \(parts[0].capitalized) · 复审 \(parts[1].capitalized)"
     }
     var modeText: String { Snapshot.modeText(configuredMode) }
+
+    static func mode(_ config: Object) -> String {
+        let legacy = (config["review_mode"] as? String ?? "claude-codex").split(separator: "-").map(String.init)
+        let writer = config["writer_harness"] as? String ?? (legacy.first ?? "")
+        let reviewer = config["reviewer_harness"] as? String ?? (legacy.count == 2 ? legacy[1] : "")
+        return writer + "-" + reviewer
+    }
+
+    var requiredHarnesses: Set<String> {
+        Set(([configuredMode] + activeModes).flatMap { $0.split(separator: "-").map(String.init) })
+    }
 
     mutating func applyExecutionStatus() {
         claude = claude.withExecution(executions["claude"] ?? [:], running: running)
         codex = codex.withExecution(executions["codex"] ?? [:], running: running)
+        if !requiredHarnesses.contains("claude") { claude = Indicator(state: "off", text: "当前分工未选用", detail: claude.detail) }
+        if !requiredHarnesses.contains("codex") { codex = Indicator(state: "off", text: "当前分工未选用", detail: codex.detail) }
     }
 
     var kind: String {
@@ -184,7 +195,7 @@ struct Snapshot {
             } else { s.schedulerProblem = "后台心跳未更新" }
         }
         s.version = health["version"] as? String ?? ""
-        s.configuredMode = config["review_mode"] as? String ?? "claude-codex"
+        s.configuredMode = Snapshot.mode(config)
         for tool in ["claude", "codex"] { s.executions[tool] = readObject(root.appendingPathComponent("data/\(tool)-execution.json")) }
         let session = config["session"] as? String ?? root.appendingPathComponent("session.json").path
         let keepalive = readObject(URL(fileURLWithPath: session).deletingLastPathComponent().appendingPathComponent("keepalive-status.json"))
@@ -243,7 +254,8 @@ struct Snapshot {
             case "working", "reviewing", "rewriting":
                 s.busy += 1
                 let plan = task["execution_plan"] as? Object ?? [:]
-                if let mode = plan["mode"] as? String, !s.activeModes.contains(mode) { s.activeModes.append(mode) }
+                let mode = (plan["writer"] as? String).flatMap { writer in (plan["reviewer"] as? String).map { writer + "-" + $0 } } ?? plan["mode"] as? String
+                if let mode = mode, !s.activeModes.contains(mode) { s.activeModes.append(mode) }
             case "queued", "revision_ready", "delivery_pending": s.queued += 1
             case "awaiting": s.awaiting += 1; s.reviews.append(task)
             case "needs_student", "failed", "approval_invalid", "submission_unknown": s.attention += 1; s.reviews.append(task)
@@ -261,7 +273,7 @@ struct Snapshot {
                 "school_valid": schoolOK, "poll_interval_seconds": pollSeconds,
                 "lark_enabled": lark, "actions_ready": actions, "messages_ready": messages,
                 "indicators": ["lark_cli": larkCLI.state, "learn": learn.state, "claude": claude.state, "codex": codex.state],
-                "review_mode": configuredMode, "active_review_modes": activeModes,
+                "review_mode": configuredMode, "active_review_modes": activeModes, "harness_label": modeText,
                 "working": busy, "queued": queued, "awaiting": awaiting, "attention": attention]
     }
 }
@@ -474,6 +486,8 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
             for mode in snapshot.activeModes { row("当前作业 · \(Snapshot.modeText(mode))") }
             row("后续版本 · \(snapshot.modeText)")
         } else { row(snapshot.modeText) }
+        harnessMenu(role: "writer", title: "选择主写 harness")
+        harnessMenu(role: "reviewer", title: "选择复审 harness")
         menu.addItem(.separator())
         indicatorRow("Lark CLI", snapshot.larkCLI)
         indicatorRow("Learn · 网络学堂", snapshot.learn)
@@ -539,7 +553,31 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func retryTool(_ sender: NSMenuItem) {
         guard let tool = sender.representedObject as? String, ["claude", "codex"].contains(tool) else { return }
-        execute(["retry", "--tool", tool], title: "检查并恢复 \(tool.capitalized)", openingText: "正在检查两个 CLI 的本地可用性，通过后将失败作业排队，由后台继续主写或复审。")
+        execute(["retry", "--tool", tool], title: "检查并恢复 \(tool.capitalized)", openingText: "正在检查此 CLI 的本地可用性，通过后将相关失败作业排队，由后台按该版本原有分工继续。")
+    }
+
+    func harnessMenu(role: String, title: String) {
+        let choices = NSMenu(title: title)
+        let parts = snapshot.configuredMode.split(separator: "-").map(String.init)
+        let index = role == "writer" ? 0 : 1
+        for name in ["codex", "claude"] {
+            let entry = NSMenuItem(title: name.capitalized, action: #selector(selectHarness(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = ["role": role, "harness": name]
+            entry.state = parts.count == 2 && parts[index] == name ? .on : .off
+            entry.isEnabled = !busyAction
+            choices.addItem(entry)
+        }
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        parent.submenu = choices
+        menu.addItem(parent)
+    }
+
+    @objc func selectHarness(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? [String: String],
+              let role = choice["role"], ["writer", "reviewer"].contains(role),
+              let harness = choice["harness"], ["claude", "codex"].contains(harness) else { return }
+        execute(["configure", "--" + role, harness], title: "更新主写与复审分工", openingText: "新选择从下一版作业开始生效，正在运行的版本保留原分工。")
     }
     @objc func openReview(_ sender: NSMenuItem) {
         guard let task = sender.representedObject as? Object else { return }

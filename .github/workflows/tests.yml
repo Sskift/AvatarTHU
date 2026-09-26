@@ -35,6 +35,8 @@ jobs:
           build/avatarthu init --no-login --no-start
           "$AVATARTHU_HOME/bin/avatarthu" --version
           "$AVATARTHU_HOME/bin/avatarthu" configure --poll-interval 12h --mode codex-claude
+          "$AVATARTHU_HOME/bin/avatarthu" configure --writer codex --reviewer codex
+          "$AVATARTHU_HOME/bin/avatarthu" configure --reviewer claude
           test ! -d "$AVATARTHU_HOME/.venv"
       - name: Check macOS release bundle and installation
         if: runner.os == 'macOS'
@@ -58,4 +60,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & "$env:AVATARTHU_HOME/bin/avatarthu.exe" --version
           & "$env:AVATARTHU_HOME/bin/avatarthu.exe" configure --poll-interval 12h --mode codex-claude
+          & "$env:AVATARTHU_HOME/bin/avatarthu.exe" configure --writer claude --reviewer claude
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "$env:AVATARTHU_HOME/bin/avatarthu.exe" configure --reviewer codex
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (Test-Path "$env:AVATARTHU_HOME/.venv") { throw 'Unexpected runtime environment' }

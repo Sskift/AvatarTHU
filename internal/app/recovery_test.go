@@ -44,11 +44,11 @@ func TestRetryPreservesUnknownSubmissionsAndExecutionFailure(t *testing.T) {
 	a.saveTaskFailure(failed, err)
 	unknown := M{"task_id": "1123456789abcdef", "status": "submission_unknown", "failure": failureFields(err), "sha256": "unchanged", "nonce": "original"}
 	a.saveTask(unknown)
-	expectError(t, "额度", a.requireUnblockedTools)
+	expectError(t, "额度", func() { a.requireUnblockedTools(a.pairing()) })
 	if a.retryTool("codex") != 1 {
 		t.Fatal("wrong number queued")
 	}
-	a.requireUnblockedTools()
+	a.requireUnblockedTools(a.pairing())
 	if calls != 0 {
 		t.Fatal("retry launched a model")
 	}

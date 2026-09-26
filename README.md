@@ -50,7 +50,7 @@
 
 ## 从零开始：第一次运行
 
-首次使用按下面六步完成。**不需要克隆仓库或安装 Go、Python。** 需要本人的网络学堂账号，以及已安装并登录的 Claude Code 和 Codex CLI；首次网络学堂登录需要 Chrome，Windows 也支持 Edge。飞书可选，不影响本地工作流。也可以直接使用下方的 [Agent 配置提示词](#agent-setup)。
+首次使用按下面六步完成。**不需要克隆仓库或安装 Go、Python。** 需要本人的网络学堂账号，以及按分工选用并已登录的 Claude Code 或 Codex CLI；首次网络学堂登录需要 Chrome，Windows 也支持 Edge。飞书可选，不影响本地工作流。也可以直接使用下方的 [Agent 配置提示词](#agent-setup)。
 
 ### 1. 下载适合自己电脑的程序
 
@@ -96,24 +96,24 @@ avatarthu --version
 
 ### 3. 准备主写和复审工具
 
-两种 CLI 都需要安装和登录，即使你正在其中一个 Agent 里完成配置。已有可用安装可直接复用；缺少时运行 `avatarthu tools` 查看安装方法，也可参照后面的[工具说明](#必需和可选工具)。分别运行 `claude`、`codex` 完成登录后退出交互会话，再检查：
+主写和复审分别选择 harness，选项均为 Claude Code 或 Codex CLI。只有选中的工具需要安装和登录；两个角色都选 Claude 时只需要 Claude，都选 Codex 时只需要 Codex。先用 `avatarthu configure --writer claude --reviewer codex` 保存分工（按自己的选择调整），再检查工具。已有可用安装可直接复用；缺少时运行 `avatarthu tools` 查看安装方法，也可参照后面的[工具说明](#必需和可选工具)。运行所选 CLI 完成登录后退出交互会话，再检查：
 
 ```sh
 avatarthu tools
 avatarthu doctor
 ```
 
-预期两个 CLI 都显示“可启动，登录检查通过”。这不代表已验证实时额度或完成了作业；实际写作与复审会使用你自己的 CLI 账号和额度。工具未就绪时仍可只同步材料，先不执行第 6 步。
+预期标为“当前分工需要”的 CLI 都显示“可启动，登录检查通过”。这不代表已验证实时额度或完成了作业；实际写作与复审会使用你自己的 CLI 账号和额度。工具未就绪时仍可只同步材料，先不执行第 6 步。
 
 ### 4. 选择分工，登录网络学堂
 
 ```sh
-avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3
+avatarthu configure --writer claude --reviewer codex --poll-interval 12h --max-review-rounds 3
 avatarthu login thu
 avatarthu keepalive run
 ```
 
-这里选择 Claude 主写、Codex 复审；交换分工可把 `claude-codex` 改为 `codex-claude`。`12h` 可换成 `30m`、`6h` 或 `1d`；保活固定每 10 分钟。两边沿用各自默认模型。
+这里选择 Claude 主写、Codex 复审；分别修改 `--writer` 和 `--reviewer` 即可，两者都支持 `claude`、`codex`，也可以选同一个 harness。`12h` 可换成 `30m`、`6h` 或 `1d`；保活固定每 10 分钟。两边沿用各自默认模型。
 
 `login thu` 在 macOS 优先复用 Chrome 中已有的网络学堂登录；不可用时打开 AvatarTHU 自己的浏览器窗口，由本人完成 SSO / 双因素认证。Windows 使用 Chrome 或 Edge。不依赖 Selenium、ChromeDriver 或外部 AutoThu 程序。
 
@@ -172,7 +172,8 @@ avatarthu keepalive status
 先阅读仓库当前 README.md（英文可读 README.en.md），以实际版本的命令和帮助为准。
 
 我的偏好（仅首次安装时作为默认；已有配置先保留）：
-- 分工：claude-codex（Claude 主写，Codex 复审；也可改为 codex-claude）
+- 主写 harness：claude（可选 claude / codex）
+- 复审 harness：codex（可选 claude / codex，可以与主写相同）
 - 课程扫描：12h；每版最多复审 3 轮；保活使用内置 10 分钟间隔
 - 飞书：关闭（可改为开启，向我本人发送卡片和云文档）
 
@@ -180,11 +181,11 @@ avatarthu keepalive status
 1. 检查操作系统、CPU 架构、已有 avatarthu、Claude Code、Codex CLI、浏览器和可选 Lark CLI。保留已有数据、登录和默认模型，不覆盖已有作业或账号配置；已有安装只补齐缺项。若已有后台在运行，报告状态并跳过首次安装、同步与启动。
 2. 如未安装 AvatarTHU，从本项目 GitHub Releases 选择最新可用的非草稿版本，包括预发布版。选择匹配系统与架构的压缩包，用同版本 SHA256SUMS 校验后解压。不要依赖 /releases/latest 一定存在，不要从第三方下载，也不要为运行 AvatarTHU 安装 Python、Go 或克隆源码编译。
 3. 使用解压后的程序执行 init --no-login --no-start。macOS 保留同目录的 AvatarTHU.app，让初始化一起安装菜单栏组件。检查 avatarthu --version；当前终端 PATH 未刷新时使用安装输出的完整路径继续。数据统一通过 ~/.avatarthu 访问，Windows 使用 %USERPROFILE%\.avatarthu；不要放进仓库。
-4. 运行 avatarthu tools。复用已有 Claude Code 和 Codex CLI，缺失时按各自官方方式安装。引导我在各 CLI 中完成登录，再运行 avatarthu doctor；两种工具都要可用。沿用各 CLI 默认模型，不修改或比较模型。不要把工具安装成功说成作业已经验证正确。
-5. 全新安装按上述偏好执行 avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3（若我修改了偏好，相应调整参数）；已有配置保留原分工和间隔，除非我明确要求更改。运行 avatarthu login thu，再运行 avatarthu keepalive run，确认 state=valid。密码、验证码和扫码由我在官方登录界面完成，不要要求我把凭据贴进聊天。
+4. 运行 avatarthu tools。先按我选择的主写和复审 harness 保存配置；已有配置保留，除非我明确要求更改。只安装分工需要的 Claude Code 或 Codex CLI。引导我在所选 CLI 中完成登录，再运行 avatarthu doctor；未选用的工具缺失不应阻止配置完成。沿用各 CLI 默认模型，不修改或比较模型。不要把工具安装成功说成作业已经验证正确。
+5. 全新安装按上述偏好执行 avatarthu configure --writer claude --reviewer codex --poll-interval 12h --max-review-rounds 3（若我修改了偏好，相应调整参数）；已有配置保留原分工和间隔，除非我明确要求更改。运行 avatarthu login thu，再运行 avatarthu keepalive run，确认 state=valid。密码、验证码和扫码由我在官方登录界面完成，不要要求我把凭据贴进聊天。
 6. 若选择飞书，执行 avatarthu login lark --no-start，复用现有登录或引导我完成应用配置与授权；缺少可选依赖时明确说明。若选择本地模式，全新安装保持飞书关闭；不要擅自修改已有飞书绑定。
 7. 后台尚未运行时，执行 avatarthu run --sync-only，再用 avatarthu status 检查课程和作业列表。此步骤不启动写作或复审；启用飞书会推送未读公告并在成功后标已读。不要做真实作业提交测试。
-8. 两种模型 CLI 和学校登录就绪后，执行 avatarthu service start 并检查 avatarthu status、avatarthu keepalive status。确认调度进程 running、学校会话 valid；选择飞书时还应检查 actions/messages 是否 ready。macOS 还用 avatarthu menubar status 检查菜单栏，必要时运行 avatarthu menubar start。后台将处理已发现的待交作业并使用我的 CLI 额度；以后按设定间隔扫描，无需负责安装的 Agent 一直在线。
+8. 所选模型 CLI 和学校登录就绪后，执行 avatarthu service start 并检查 avatarthu status、avatarthu keepalive status。确认调度进程 running、学校会话 valid；选择飞书时还应检查 actions/messages 是否 ready。macOS 还用 avatarthu menubar status 检查菜单栏，必要时运行 avatarthu menubar start。后台将处理已发现的待交作业并使用我的 CLI 额度；以后按设定间隔扫描，无需负责安装的 Agent 一直在线。
 9. 汇报实际版本、安装和数据路径、主写/复审分工、扫描/保活间隔、飞书是否启用、后台状态、已有审阅入口及停止命令 avatarthu service stop。任何步骤受阻，都说明具体原因和下一条操作，不把未完成项说成已完成；缺少工具时可停在仅同步阶段。
 
 提交作业必须等待我本人对当前版本的卡片操作；不要点击提交按钮或模拟回调。保留每轮独立复审意见，不用虚构结果展示配置成功。不要输出 Cookie、token、应用密钥或个人课程内容。
@@ -196,11 +197,11 @@ avatarthu keepalive status
 | --- | --- |
 | 调度、同步、下载、目录管理、审阅页 | 无额外语言运行时 |
 | 网络学堂首次登录 / 重新认证 | 已安装的 Chrome；Windows 也支持 Edge |
-| 主写与独立复审 | Claude Code、Codex CLI，都需安装并登录 |
+| 主写与独立复审 | 各自选 Claude Code 或 Codex CLI；只需安装并登录所选工具 |
 | 飞书文档、卡片、批注与回调 | 可选 Lark CLI；安装时复用现有版本，缺失时可用 npm 自动安装 |
 | 特定作业的编译、实验或报告工具 | 由题目决定；无法完成或验证的部分会明确报告 |
 
-运行 `avatarthu tools` 可查看安装方式，`avatarthu doctor` 检查两个执行器的路径、版本、登录及所需参数。找不到程序、未登录、额度限制、网络问题、权限不足、版本不兼容和默认配置不可用会分别给出说明。
+运行 `avatarthu tools` 可查看安装方式，`avatarthu doctor` 显示两个执行器的路径、版本、登录及所需参数，但只有当前分工需要的工具会影响检查是否通过。找不到程序、未登录、额度限制、网络问题、权限不足、版本不兼容和默认配置不可用会分别给出说明。
 
 如果已有 Node.js/npm，可安装两种 CLI：
 
@@ -241,7 +242,7 @@ macOS 发布包附带原生 AppKit 菜单栏。初始化安装组件后，`avata
 2. **打开产物：** 从“打开审阅文档”进入现有云文档或本地审阅页，也可以打开课程目录、日志和详细状态窗口。
 3. **处理问题：** 可以启动或停止后台、立即检查保活、重新登录网络学堂。菜单栏没有作业提交按钮，提交仍由本人在当前版本卡片中确认。
 4. **独立开关：** “退出菜单栏”只关闭监控，后台继续运行，下次登录系统时重新显示。`service stop` 则只停止课程循环，菜单栏保留并显示停止状态。
-5. **恢复执行：** 最近一次模型请求失败时，菜单显示对应工具的错误详情及“检查并恢复”入口。本地登录检查通过不会覆盖实际执行异常；手动恢复会重新检查两个 CLI，并把该工具的失败作业排队，实际执行成功后才清除异常。
+5. **恢复执行：** 最近一次模型请求失败时，菜单显示对应工具的错误详情及“检查并恢复”入口。本地登录检查通过不会覆盖实际执行异常；手动恢复会重新检查对应 CLI，并把该工具的失败作业排队，实际执行成功后才清除异常。
 
 ```sh
 avatarthu menubar start           # 打开菜单栏，并启用登录时显示
@@ -253,24 +254,32 @@ avatarthu menubar stop            # 关闭菜单栏及其自启动；后台继�
 
 旧版用户需重新下载完整 macOS 压缩包，在解压目录运行 `./avatarthu init --no-login --no-start`，再运行 `avatarthu menubar start`；已有课程、账号与作业保留。只用 `go build ./cmd/avatarthu` 构建的 CLI 不含菜单栏；完整 macOS 发布包需在 Mac 上通过 `go run ./cmd/release --os darwin --arch arm64 --out dist` 构建，Intel 架构使用 `--arch amd64`。只有开发者构建菜单栏时需要 Xcode Command Line Tools。
 
-## 两种交叉复审模式
+## 分别选择主写与复审 harness
 
 ```sh
 # Claude 主写，Codex 独立复审
-avatarthu configure --mode claude-codex
+avatarthu configure --writer claude --reviewer codex
 
-# Codex 主写，Claude 独立复审
-avatarthu configure --mode codex-claude
+# 也可以分别选用相同的 harness；复审仍是全新会话
+avatarthu configure --writer codex --reviewer codex
+avatarthu configure --writer claude --reviewer claude
+
+# 只更换一个角色，保留另一个角色
+avatarthu configure --reviewer claude
 
 # 每版最多自动复审 3 轮；0 表示不限
 avatarthu configure --max-review-rounds 3
 ```
+
+四种组合都支持。macOS 菜单栏中可分别打开“选择主写 harness”和“选择复审 harness”进行切换。新配置从下一版作业生效，当前版本及中断恢复继续使用该版本保存的分工；旧的 `--mode claude-codex` / `--mode codex-claude` 命令和配置仍兼容。未被当前配置或运行中版本选用的 CLI 显示灰色，不阻止处理。
 
 每个阶段使用新进程、新会话、新工作目录；两边分别使用自己的默认模型配置。AvatarTHU 不指定、比较或约束模型。
 
 复审者只收到原始作业、课件和当前候选文件，不传主写对话、自查记录、之前的修改意见或复审结论，并关闭该次会话的记忆、额外规则发现和外部工具集成。它独立读取题目、检查答案和产物，必要时自行复算或运行。这里实现的是输入与会话隔离；本机 CLI 仍受其自身权限与执行环境约束。
 
 复审不通过时，把具体评论交给主写，在新会话中修改后再复审。每轮完成的评论和检查记录都持久保存，即使中途退出也不会丢掉已完成的复审。达到轮数上限仍未通过时交给本人处理，不呈现为可直接提交。
+
+复审会区分产物问题与环境限制。沙箱无法打开图形窗口等情况单独记录，不当成程序损坏反复要求重写；复审结合源码、独立计算和实际运行截图判断。关键行为缺少足够证据时仍不会批准。
 
 交叉复审能发现遗漏和错误，但不等于数学、实验或程序正确性的保证。最终审阅和提交决定始终由本人作出。
 

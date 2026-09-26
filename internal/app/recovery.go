@@ -38,8 +38,11 @@ func (a *App) recordToolFailure(err error, role, job string) {
 	writeJSON(a.data(str(value, "tool")+"-execution.json"), value)
 }
 
-func (a *App) requireUnblockedTools() {
+func (a *App) requireUnblockedTools(plan M) {
 	for _, tool := range []string{"claude", "codex"} {
+		if !usesHarness(plan, tool) {
+			continue
+		}
 		value := readMap(a.data(tool + "-execution.json"))
 		if str(value, "state") == "failed" && !boolean(value, "retryable") && str(value, "retry_requested_at") == "" {
 			panic(&toolFailure{Tool: tool, Category: str(value, "category"), Reason: str(value, "reason"),
@@ -71,9 +74,8 @@ func taskRetryDue(st M, tick bool) bool {
 func (a *App) retryTool(tool string) int {
 	ensure(tool == "claude" || tool == "codex", "用法：avatarthu retry --tool claude|codex")
 	if a.RunModel == nil {
-		for _, result := range a.inspectPair(a.pairing()) {
-			ensure(boolean(result, "usable"), str(result, "tool")+"："+str(result, "reason"))
-		}
+		result := a.probe(tool, str(a.config(), tool+"_cli"))
+		ensure(boolean(result, "usable"), str(result, "tool")+"："+str(result, "reason"))
 	}
 	defer a.lock("model-worker", false)()
 	health := readMap(a.data(tool + "-execution.json"))

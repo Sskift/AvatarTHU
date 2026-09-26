@@ -305,7 +305,7 @@ func (a *App) process(st M) {
 		st["execution_plan"] = plan
 	}
 	a.saveTask(st)
-	a.requireUnblockedTools()
+	a.requireUnblockedTools(plan)
 	a.requirePair(plan)
 	var result M
 	var job string

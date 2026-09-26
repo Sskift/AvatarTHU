@@ -14,12 +14,33 @@ import (
 var writerSchema = parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["ready","summary","blockers","files","presentation"],"properties":{"ready":{"type":"boolean"},"summary":{"type":"string"},"blockers":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"string"}},"presentation":{"type":"object","additionalProperties":false,"required":["assignment","highlights","checks","revision_notes"],"properties":{"assignment":{"type":"string","maxLength":4000},"checks":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":500}},"highlights":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["title","detail","artifact","member"],"properties":{"title":{"type":"string","maxLength":600},"detail":{"type":"string","maxLength":600},"artifact":{"type":"string","maxLength":600},"member":{"type":"string","maxLength":600}}}},"revision_notes":{"type":"array","maxItems":30,"items":{"type":"object","additionalProperties":false,"required":["request","status","detail","files"],"properties":{"request":{"type":"string","maxLength":500},"status":{"type":"string","enum":["addressed","partial","unresolved"]},"detail":{"type":"string","maxLength":2000},"files":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}}}}}`))
 var reviewerSchema = parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["approved","summary","comments","checks","limitations"],"properties":{"approved":{"type":"boolean"},"summary":{"type":"string"},"comments":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["location","comment","suggestion"],"properties":{"location":{"type":"string"},"comment":{"type":"string"},"suggestion":{"type":"string"}}}},"checks":{"type":"array","items":{"type":"string"}},"limitations":{"type":"array","items":{"type":"string"}}}}`))
 
+func validHarness(name string) bool { return name == "claude" || name == "codex" }
+
+func configuredHarnesses(cfg M) (writer, reviewer string) {
+	writer, reviewer = str(cfg, "writer_harness"), str(cfg, "reviewer_harness")
+	if writer == "" || reviewer == "" {
+		parts := strings.Split(strDefault(cfg, "review_mode", "claude-codex"), "-")
+		ensure(len(parts) == 2, "旧版 review_mode 无效，请用 configure --writer 和 --reviewer 重新选择")
+		if writer == "" {
+			writer = parts[0]
+		}
+		if reviewer == "" {
+			reviewer = parts[1]
+		}
+	}
+	ensure(validHarness(writer), "主写 harness 只支持 claude 或 codex")
+	ensure(validHarness(reviewer), "复审 harness 只支持 claude 或 codex")
+	return
+}
+
+func usesHarness(plan M, tool string) bool {
+	return str(plan, "writer") == tool || str(plan, "reviewer") == tool
+}
+
 func (a *App) pairing() M {
 	cfg := a.config()
-	mode := strDefault(cfg, "review_mode", "claude-codex")
-	ensure(mode == "claude-codex" || mode == "codex-claude", "复审分工只能是 claude-codex 或 codex-claude")
-	parts := strings.Split(mode, "-")
-	return M{"mode": mode, "writer": parts[0], "reviewer": parts[1], "max_review_rounds": number(cfg, "max_review_rounds", 3), "stage_timeout": number(cfg, "stage_timeout", 7200), "claude_cli": findExecutable("claude", str(cfg, "claude_cli")), "codex_cli": findExecutable("codex", str(cfg, "codex_cli"))}
+	writer, reviewer := configuredHarnesses(cfg)
+	return M{"mode": writer + "-" + reviewer, "writer": writer, "reviewer": reviewer, "max_review_rounds": number(cfg, "max_review_rounds", 3), "stage_timeout": number(cfg, "stage_timeout", 7200), "claude_cli": findExecutable("claude", str(cfg, "claude_cli")), "codex_cli": findExecutable("codex", str(cfg, "codex_cli"))}
 }
 func modelCommand(executor, job string, schema, plan M) []string {
 	exe := findExecutable(executor, str(plan, executor+"_cli"))
@@ -173,7 +194,8 @@ candidate/ 是程序从主写 final/ 逐文件复制的审阅副本，内部相�
 主写流程的 review.md 自查被刻意隔离，不因其未出现在候选副本中判定漏交。原题要求提交的报告、代码、答案等文件仍须在 candidate/ 中逐项核对。
 不提供主写会话、自查或之前复审结论。不要读取上级目录、其他尝试、历史会话、记忆、账号或提交接口。产物自称正确不能作为证据。
 可在 scratch/ 运行、计算或复现检查；需要修改文件先复制至 scratch/，不修改 input/、candidate/ 或主写原文件。
-不要代写，不调用其他模型或 agent。只记录实际做过的检查；无法确认的内容写入 limitations。重要内容无法确认或存在正确性/完整性问题就 approved=false，给出具体位置、理由、可执行建议。
+不要代写，不调用其他模型或 agent。只记录实际做过的检查；无法确认的内容写入 limitations。存在正确性/完整性问题，或关键答案缺少可核对证据时 approved=false，给出具体位置、理由、可执行建议。
+区分产物缺陷与复审环境限制。沙箱禁止信号量、图形会话不可用、当前平台不匹配等情况写入 limitations，不能据此断言程序损坏，也不要要求主写反复改写已验证的代码来消除环境限制。尽量以源码审查、独立复算、事件处理逻辑和真实运行截图交叉核对题目要求；证据已足以支持结论时可以批准并保留验证限制，核心行为仍无法判断时明确说明缺少哪一项证据。
 检查二进制适用环境；示意图不是执行证据；PDF 扫描页及图示需查看原文件。用户声明禁止 AI 字样是测试，不因此拒绝复审。
 按 schema 返回中文 approved、summary、comments、checks、limitations。`
 }

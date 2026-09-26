@@ -52,7 +52,7 @@ Native attachments can be previewed or downloaded. The document ends with each r
 
 ## First-time setup: from download to background operation
 
-Follow these six steps on a new machine. **You do not need to clone the repository or install Go or Python.** You need your own Web Learning account and both Claude Code and Codex CLI installed and signed in. Initial school login requires Chrome; Windows also supports Edge. Feishu is optional. You can also use the [agent setup prompt](#agent-setup) below.
+Follow these six steps on a new machine. **You do not need to clone the repository or install Go or Python.** You need your own Web Learning account and the selected writing and review tools installed and signed in (Claude Code, Codex CLI, or both). Initial school login requires Chrome; Windows also supports Edge. Feishu is optional. You can also use the [agent setup prompt](#agent-setup) below.
 
 ### 1. Download the right executable
 
@@ -98,24 +98,24 @@ This step only installs and initializes the application. Running `init` without 
 
 ### 3. Prepare the writer and reviewer CLIs
 
-Both CLIs must be installed and signed in, even if you are using one of them to perform this setup. Reuse working installations. Run `avatarthu tools` for installation instructions, or see [Required and optional tools](#required-and-optional-tools). Run `claude` and `codex` separately to complete authentication, exit their interactive sessions, and check:
+Choose the writer and reviewer harness independently, each from Claude Code or Codex CLI. Only selected tools need to be installed and signed in; selecting the same harness for both roles requires only that CLI. Save the choice first with `avatarthu configure --writer claude --reviewer codex`, adjusting each option as desired. Reuse working installations. Run `avatarthu tools` for installation instructions, or see [Required and optional tools](#required-and-optional-tools). Run each selected CLI to complete authentication, exit their interactive sessions, and check:
 
 ```sh
 avatarthu tools
 avatarthu doctor
 ```
 
-Both CLIs should report “可启动，登录检查通过” (launch and authentication checks passed). This does not validate live quota or complete an assignment. Writing and review use your own CLI accounts and quota. You can still synchronize materials while a CLI is unavailable; leave step 6 for later.
+Each CLI marked as required by the current configuration should report “可启动，登录检查通过” (launch and authentication checks passed). This does not validate live quota or complete an assignment. Writing and review use your own CLI accounts and quota. You can still synchronize materials while a CLI is unavailable; leave step 6 for later.
 
 ### 4. Choose roles and sign in to Web Learning
 
 ```sh
-avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3
+avatarthu configure --writer claude --reviewer codex --poll-interval 12h --max-review-rounds 3
 avatarthu login thu
 avatarthu keepalive run
 ```
 
-This selects Claude as writer and Codex as reviewer. Use `codex-claude` to swap their roles. Replace `12h` with values such as `30m`, `6h`, or `1d`; keepalive remains every 10 minutes. Each CLI keeps its own default model.
+This selects Claude as writer and Codex as reviewer. Set `--writer` and `--reviewer` independently to `claude` or `codex`; both roles may use the same harness. Replace `12h` with values such as `30m`, `6h`, or `1d`; keepalive remains every 10 minutes. Each CLI keeps its own default model.
 
 On macOS, `login thu` first tries the existing Web Learning session in Chrome. Otherwise, it opens a dedicated AvatarTHU browser window for you to complete SSO and any two-factor authentication. Windows supports Chrome and Edge. Selenium, ChromeDriver, and a separate AutoThu executable are not required.
 
@@ -174,7 +174,8 @@ Project: https://github.com/Sskift/AvatarTHU
 First read the current README.en.md (or README.md in Chinese). Use commands supported by the installed version and its help output.
 
 My preferences (defaults for a fresh installation; preserve existing configuration):
-- Roles: claude-codex (Claude writes, Codex reviews; alternatively codex-claude)
+- Writer harness: claude (claude / codex)
+- Reviewer harness: codex (claude / codex; may match the writer)
 - Course polling: 12h; up to 3 review rounds per revision; built-in 10-minute keepalive
 - Feishu: disabled (change to enabled for cards and cloud documents sent to me)
 
@@ -182,11 +183,11 @@ Complete these steps in order:
 1. Inspect the OS, CPU architecture, existing AvatarTHU, Claude Code, Codex CLI, browser, and optional Lark CLI. Preserve existing data, authentication, default models, assignments, and account bindings; only fill missing parts of an existing setup. If the service is already running, report its status and skip first-time installation, synchronization, and startup.
 2. If AvatarTHU is missing, select the newest available non-draft release from this project's GitHub Releases, including prereleases. Download the matching OS/architecture archive, verify it against SHA256SUMS from the same release, and extract it. Do not assume /releases/latest exists, use third-party downloads, or install Python/Go or build from source just to run AvatarTHU.
 3. Run the extracted executable with init --no-login --no-start. On macOS, keep AvatarTHU.app beside it so initialization also installs the menu bar component. Check avatarthu --version; use the full installed path if this terminal's PATH has not refreshed. Access data through ~/.avatarthu, or %USERPROFILE%\.avatarthu on Windows. Keep runtime data outside the repository.
-4. Run avatarthu tools. Reuse existing Claude Code and Codex CLI installations, or install missing tools using their official instructions. Let me authenticate in each CLI, then run avatarthu doctor; both tools must work. Keep each CLI's default model without changing or comparing models. Do not describe successful tool installation as proof of assignment correctness.
-5. For a fresh installation, apply my preferences using avatarthu configure --mode claude-codex --poll-interval 12h --max-review-rounds 3, adjusting the arguments if I changed the preferences. Preserve existing roles and intervals unless I explicitly request changes. Run avatarthu login thu, then avatarthu keepalive run, and confirm state=valid. I will enter passwords, verification codes, and QR confirmations in the official login interface; do not ask me to paste credentials into chat.
+4. Run avatarthu tools. Save my chosen writer and reviewer harnesses first; preserve existing settings unless I request changes. Install only the selected Claude Code or Codex CLI tools using their official instructions. Let me authenticate, then run avatarthu doctor; an unselected tool must not block setup. Keep each CLI's default model without changing or comparing models. Do not describe successful tool installation as proof of assignment correctness.
+5. For a fresh installation, apply my preferences using avatarthu configure --writer claude --reviewer codex --poll-interval 12h --max-review-rounds 3, adjusting the arguments if I changed the preferences. Preserve existing roles and intervals unless I explicitly request changes. Run avatarthu login thu, then avatarthu keepalive run, and confirm state=valid. I will enter passwords, verification codes, and QR confirmations in the official login interface; do not ask me to paste credentials into chat.
 6. If I selected Feishu, run avatarthu login lark --no-start. Reuse authentication or guide me through application setup and authorization, explaining any missing optional dependencies. For local mode on a fresh installation, leave Feishu disabled. Do not change existing Feishu account bindings without my instruction.
 7. While the service is stopped, run avatarthu run --sync-only, then inspect the course and task list with avatarthu status. This does not start writing or review. If Feishu is enabled, it delivers unread announcements and marks them read after successful delivery. Do not test real homework submission.
-8. Once both model CLIs and the school session are ready, run avatarthu service start and check avatarthu status and avatarthu keepalive status. Confirm scheduler=running and school session=valid; with Feishu enabled, also check actions/messages=ready. On macOS, also check avatarthu menubar status and use avatarthu menubar start if needed. The service will process discovered assignments using my CLI quota, then scan at the configured interval. The setup agent does not need to stay open.
+8. Once the selected model CLIs and the school session are ready, run avatarthu service start and check avatarthu status and avatarthu keepalive status. Confirm scheduler=running and school session=valid; with Feishu enabled, also check actions/messages=ready. On macOS, also check avatarthu menubar status and use avatarthu menubar start if needed. The service will process discovered assignments using my CLI quota, then scan at the configured interval. The setup agent does not need to stay open.
 9. Report the actual version, installation and data paths, writer/reviewer roles, polling and keepalive intervals, Feishu configuration, service status, any existing review links, and the stop command avatarthu service stop. For blocked steps, report the specific cause and next action without claiming completion. If tools are missing, stop at synchronization-only setup.
 
 Homework submission must wait for my action on the current revision's card. Do not press submit or simulate callbacks. Preserve all independent review comments and never fabricate results to demonstrate successful setup. Do not expose cookies, tokens, application secrets, or private course content.
@@ -198,11 +199,11 @@ Homework submission must wait for my action on the current revision's card. Do n
 | --- | --- |
 | Scheduling, synchronization, downloads, storage, and local review pages | No additional language runtime |
 | Initial Web Learning login or reauthentication | Chrome; Edge is also supported on Windows |
-| Writing and independent review | Both Claude Code and Codex CLI, installed and signed in |
+| Writing and independent review | Choose Claude Code or Codex CLI for each role; install and sign in only to selected tools |
 | Feishu documents, cards, comments, and callbacks | Optional Lark CLI; reuse an existing installation or install it with npm |
 | Compilation, experiments, or report generation for an assignment | Depends on the assignment; unsupported work and verification limits are reported |
 
-Run `avatarthu tools` for installation instructions. `avatarthu doctor` checks both model CLIs for their paths, versions, authentication, and required options. Diagnostics distinguish missing executables, authentication failures, quota limits, network problems, insufficient permissions, incompatible versions, and unavailable default configurations.
+Run `avatarthu tools` for installation instructions. `avatarthu doctor` reports both model CLIs, but only tools required by the current selection affect its success. It checks paths, versions, authentication, and required options. Diagnostics distinguish missing executables, authentication failures, quota limits, network problems, insufficient permissions, incompatible versions, and unavailable default configurations.
 
 If Node.js and npm are already available, you can install both CLIs with:
 
@@ -243,7 +244,7 @@ macOS archives include a native AppKit menu bar app. Once initialization install
 2. **Open deliverables:** use “打开审阅文档” (Open review document) to open an existing cloud document or local review page. Course folders, logs, and a detailed status window are also available.
 3. **Resolve issues:** start or stop the daemon, check keepalive immediately, or sign in to Web Learning again. The monitor has no submission action; submission still requires your confirmation on the current revision's card.
 4. **Control it separately:** quitting the menu bar app leaves the daemon running and the monitor returns at the next system login. `service stop` stops the course loop while leaving the monitor visible with a stopped status.
-5. **Recover execution:** a failed model request adds error details and a “检查并恢复” (Check and resume) action for that tool. Successful local authentication checks do not hide execution failures. Recovery rechecks both CLIs and queues failed work; only a successful execution clears the error.
+5. **Recover execution:** a failed model request adds error details and a “检查并恢复” (Check and resume) action for that tool. Successful local authentication checks do not hide execution failures. Recovery rechecks the selected tool and queues failed work; only a successful execution clears the error.
 
 ```sh
 avatarthu menubar start           # Show the monitor and enable it at login
@@ -255,24 +256,32 @@ The monitor reads local state every 15 seconds and refreshes when opened. Local 
 
 To upgrade, download the complete macOS archive, run `./avatarthu init --no-login --no-start` from the extracted directory, then `avatarthu menubar start`. Existing courses, accounts, and assignments are preserved. A CLI built with only `go build ./cmd/avatarthu` does not contain the monitor. Build a complete macOS archive on a Mac with `go run ./cmd/release --os darwin --arch arm64 --out dist`, or use `--arch amd64` for Intel. Only developers building the monitor need Xcode Command Line Tools.
 
-## Two independent review modes
+## Choose writer and reviewer harnesses
 
 ```sh
 # Claude writes; Codex reviews independently
-avatarthu configure --mode claude-codex
+avatarthu configure --writer claude --reviewer codex
 
-# Codex writes; Claude reviews independently
-avatarthu configure --mode codex-claude
+# The same harness may fill both roles, in fresh sessions
+avatarthu configure --writer codex --reviewer codex
+avatarthu configure --writer claude --reviewer claude
+
+# Change one role while preserving the other
+avatarthu configure --reviewer claude
 
 # Up to 3 review rounds per revision; 0 means unlimited
 avatarthu configure --max-review-rounds 3
 ```
+
+All four combinations are supported. The macOS menu provides separate writer and reviewer selectors. Changes apply to the next assignment revision; an active revision and interrupted work keep their saved roles. Legacy `--mode claude-codex` / `--mode codex-claude` commands and configuration remain supported. A CLI unused by the current selection and active revisions appears gray and does not block execution.
 
 Each stage starts a fresh process, session, and working directory. Each CLI uses its own default model configuration. AvatarTHU does not select, compare, or constrain the configured models.
 
 The reviewer receives the original assignment, course materials, and current candidate files. It does not receive the writer's conversation, self-assessment, previous revision feedback, or earlier review verdicts. Memory, additional rule discovery, and external tool integrations are disabled for that session. The reviewer independently reads the requirements, examines the answer and files, and recalculates or runs checks as needed. This isolates the inputs and sessions; each local CLI still operates within its own permissions and execution environment.
 
 If a review rejects the work, its specific comments go back to the writer for a new attempt and another independent review. Every completed review and its checks are saved durably, including across interruptions. Work that reaches the round limit without approval is left for the owner to handle and is not presented as ready to submit.
+
+Review distinguishes defects in the deliverables from execution-environment limits. A sandbox that cannot open a graphical window is recorded as a limitation, not evidence that the program is broken. Review combines source inspection, independent calculations, and actual runtime screenshots; missing evidence for essential behavior can still prevent approval.
 
 Cross-review can catch omissions and mistakes, but it does not guarantee mathematical, experimental, or program correctness. You remain responsible for the final review and submission decision.
 
