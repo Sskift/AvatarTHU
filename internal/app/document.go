@@ -263,7 +263,7 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 		return `<figure view-type="Card"><source path="@./` + esc(filepath.ToSlash(relative(a.Root, p))) + `" name="` + esc(name) + `"/></figure>`
 	}
 	pres := obj(st, "presentation")
-	blocks := []string{"<title>" + esc(fmt.Sprintf("%s · 第 %d 版审阅", str(st, "title"), number(st, "revision", 1))) + "</title>", paragraph(str(st, "course") + " · 截止 " + str(st, "deadline") + "（北京时间）"), `<callout emoji="📦" background-color="light-blue">` + paragraph(fmt.Sprintf("本版有 %d 份交付文件，完整产物集中在第三部分。请对照原题审阅；待补充事项见第二部分。", len(paths))) + "</callout>", a.revisionChanges(st, local, attach), "<h1>一、作业描述</h1>"}
+	blocks := []string{"<title>" + esc(str(st, "title")+" · 审阅") + "</title>", paragraph(str(st, "course") + " · 截止 " + str(st, "deadline") + "（北京时间）"), `<callout emoji="📦" background-color="light-blue">` + paragraph(fmt.Sprintf("本版有 %d 份交付文件，完整产物集中在第三部分。请对照原题审阅；待补充事项见第二部分。", len(paths))) + "</callout>", a.revisionChanges(st, local, attach), "<h1>一、作业描述</h1>"}
 	assignment := strDefault(st, "description", "未提供文字描述，请查看原题附件。")
 	blocks = append(blocks, prose(cut(assignment, 6000)))
 	if cut(assignment, 6000) != assignment {
@@ -387,7 +387,7 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 		instructions[2] = "运行 avatarthu revise " + str(st, "task_id") + ` --feedback "修改意见"，下一次调度生成新版。`
 		instructions[3] = "本地模式请自行在网络学堂网页提交；启用飞书后可通过本人当前版本卡片决定提交。"
 	}
-	blocks = append(blocks, ordered(instructions), "<h1>五、历次独立复审</h1>", paragraph("主写和复审使用不同工具的新进程与新会话，各用 CLI 默认模型。复审只接收原题和当前候选产物，不传递主写对话、自查或以前的复审结论。历次意见如下；最终提交仍由本人决定。"))
+	blocks = append(blocks, ordered(instructions), "<h1>五、历次独立复审</h1>", paragraph("主写和复审分别使用新进程与新会话，各用 CLI 默认模型。复审只接收原题和当前候选产物，不传递主写对话、自查或以前的复审结论。历次意见如下；最终提交仍由本人决定。"))
 	history := objects(st["review_history"])
 	if len(history) == 0 {
 		blocks = append(blocks, paragraph("本版尚无独立复审记录，请本人核对。"))
@@ -489,11 +489,40 @@ func (a *App) publishCloud(st M) M {
 		r = a.lark("docs", "+create", "--as", "user", "--doc-format", "xml", "--content", arg)
 		merge(review, obj(r, "document"))
 		review["warnings"] = r["warnings"]
+		review["written"] = true
+		a.saveTask(st)
+	}
+	if !boolean(review, "written") {
+		previous := a.lark("docs", "+fetch", "--as", "user", "--doc", str(review, "document_id"), "--detail", "with-ids")
+		if !cloudContainsArtifacts(str(obj(previous, "document"), "content"), review) {
+			backup := filepath.Join(filepath.Dir(str(review, "draft")), "previous-cloud.json")
+			if !exists(backup) {
+				writeJSON(backup, previous)
+			}
+			parsed := a.lark("docs", "+script", "--command", "parse", "--content", arg)
+			ensure(str(obj(parsed, "assessment"), "status") == "passed", "飞书文档解析未通过，请检查草稿日志")
+			updated := a.lark("docs", "+update", "--as", "user", "--doc", str(review, "document_id"), "--command", "overwrite", "--doc-format", "xml", "--content", arg)
+			ensure(str(updated, "result") == "success", "审阅文档未完整更新，请检查飞书回执")
+			review["warnings"] = updated["warnings"]
+		}
+		review["written"] = true
 		a.saveTask(st)
 	}
 	fetched := a.lark("docs", "+fetch", "--as", "user", "--doc", str(review, "document_id"), "--detail", "with-ids")
 	writeJSON(filepath.Join(filepath.Dir(str(review, "draft")), "published.json"), fetched)
 	content := str(obj(fetched, "document"), "content")
+	warnings := review["warnings"]
+	emptyWarnings := warnings == nil || string(jsonBytes(warnings)) == "[]"
+	ensure(cloudContainsArtifacts(content, review) && emptyWarnings, "审阅文档发布不完整，已保留回执，请修复后重试")
+	review["verified"] = true
+	a.saveTask(st)
+	return review
+}
+
+func cloudContainsArtifacts(content string, review M) bool {
+	if !strings.Contains(content, str(review, "marker")) {
+		return false
+	}
 	counts := map[string]int{}
 	images := 0
 	dec := xml.NewDecoder(strings.NewReader("<root>" + content + "</root>"))
@@ -524,15 +553,12 @@ func (a *App) publishCloud(st M) M {
 		}
 	}
 	for _, n := range texts(review["attachment_names"]) {
-		ensure(counts[n] > 0, "文档附件尚未完整发布："+n)
+		if counts[n] == 0 {
+			return false
+		}
 		counts[n]--
 	}
-	warnings := review["warnings"]
-	emptyWarnings := warnings == nil || string(jsonBytes(warnings)) == "[]"
-	ensure(strings.Contains(content, str(review, "marker")) && images >= number(review, "image_count", 0) && emptyWarnings, "审阅文档发布不完整，已保留回执，请修复后重试")
-	review["verified"] = true
-	a.saveTask(st)
-	return review
+	return images >= number(review, "image_count", 0)
 }
 func (a *App) comments(st M) []M {
 	link := str(obj(st, "review_doc"), "url")

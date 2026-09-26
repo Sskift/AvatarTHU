@@ -177,7 +177,7 @@ func (a *App) revisionChanges(st M, local bool, attach func(string, string) stri
 	}
 	oldRevision := number(previous, "revision", 1)
 	blocks = append(blocks, paragraph(fmt.Sprintf("文件对照：第 %d 版 → 第 %d 版，依据冻结产物的实际内容。", oldRevision, number(st, "revision", 1))))
-	if u, e := url.Parse(str(obj(previous, "review_doc"), "url")); e == nil && u.Scheme == "https" && u.Host != "" {
+	if u, e := url.Parse(str(obj(previous, "review_doc"), "url")); e == nil && u.Scheme == "https" && u.Host != "" && u.String() != str(obj(st, "review_doc"), "url") {
 		blocks = append(blocks, `<p><a href="`+esc(u.String())+`">打开上版审阅文档</a></p>`)
 	} else if local && str(previous, "local_review") != "" {
 		if e := attempt(func() {

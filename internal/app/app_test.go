@@ -307,6 +307,16 @@ func TestOwnerFeedbackInvalidatesOldCard(t *testing.T) {
 func mockCloud(t *testing.T, a *App, ambiguous bool) *int {
 	t.Helper()
 	creates := new(int)
+	published := ""
+	draftContent := func() string {
+		var st M
+		for _, s := range a.tasks() {
+			st = s
+		}
+		b, e := os.ReadFile(str(obj(st, "review_doc"), "draft"))
+		check(e)
+		return regexp.MustCompile(`<source path="[^"]*"`).ReplaceAllString(string(b), `<source token="filetoken"`)
+	}
 	a.CallLark = func(args []string) M {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "init-draft") {
@@ -322,17 +332,15 @@ func mockCloud(t *testing.T, a *App, ambiguous bool) *int {
 			if ambiguous {
 				panic(fmt.Errorf("create timed out"))
 			}
+			published = draftContent()
 			return M{"document": M{"document_id": "doc1", "url": "https://example.test/doc1"}, "warnings": []any{}}
 		}
+		if strings.Contains(joined, "+update") {
+			published = draftContent()
+			return M{"result": "success", "warnings": []any{}}
+		}
 		if strings.Contains(joined, "+fetch") {
-			var st M
-			for _, s := range a.tasks() {
-				st = s
-			}
-			b, e := os.ReadFile(str(obj(st, "review_doc"), "draft"))
-			check(e)
-			content := regexp.MustCompile(`<source path="[^"]*"`).ReplaceAllString(string(b), `<source token="filetoken"`)
-			return M{"document": M{"content": content}}
+			return M{"document": M{"content": published}}
 		}
 		t.Fatal(joined)
 		return nil
@@ -370,6 +378,53 @@ func TestUnknownDocumentCreateDoesNotDuplicate(t *testing.T) {
 	expectError(t, "待核对", func() { a.publishCloud(st) })
 	if *creates != 1 {
 		t.Fatal("duplicate doc")
+	}
+}
+
+func TestRevisionsUpdateOneCloudDocument(t *testing.T) {
+	for _, interrupted := range []bool{false, true} {
+		t.Run(fmt.Sprint(interrupted), func(t *testing.T) {
+			a := testApp(t)
+			a.saveConfig(M{"lark_enabled": true})
+			st := frozen(t, a)
+			st["review_history"] = []M{{"revision": 1, "round": 1, "summary": "first independent review", "approved": true}}
+			creates := mockCloud(t, a, false)
+			a.publishCloud(st)
+			a.rememberRevision(st)
+			st["revision"] = 2
+			st["review_history"] = append(objects(st["review_history"]), M{"revision": 2, "round": 1, "summary": "second independent review", "approved": true})
+			job := filepath.Join(a.Root, "second-writer")
+			a.snapshot(st, resultAt(job, "revised answer"), job)
+			if doc := obj(st, "review_doc"); str(doc, "document_id") != "doc1" || boolean(doc, "verified") || str(doc, "draft") != "" {
+				t.Fatal("lost document identity or retained old publication state", doc)
+			}
+			original := a.CallLark
+			updates := 0
+			a.CallLark = func(args []string) M {
+				value := original(args)
+				if strings.Contains(strings.Join(args, " "), "+update") {
+					updates++
+					if interrupted {
+						panic(fmt.Errorf("update timed out after server applied it"))
+					}
+				}
+				return value
+			}
+			if interrupted {
+				expectError(t, "timed out", func() { a.publishCloud(st) })
+			}
+			a.publishCloud(st)
+			a.publishCloud(st)
+			if *creates != 1 || updates != 1 || str(obj(st, "review_doc"), "url") != "https://example.test/doc1" {
+				t.Fatal("duplicated document or update", *creates, updates, st)
+			}
+			content := str(obj(original([]string{"docs", "+fetch"}), "document"), "content")
+			for _, want := range []string{"first independent review", "second independent review", str(obj(st, "review_doc"), "marker")} {
+				if !strings.Contains(content, want) {
+					t.Fatal("missing history or current revision", want)
+				}
+			}
+		})
 	}
 }
 func TestDocumentNativeListsMathAndEscape(t *testing.T) {

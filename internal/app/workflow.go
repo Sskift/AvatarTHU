@@ -351,6 +351,12 @@ func (a *App) outputDir(st M) string {
 	return filepath.Join(a.Root, "outbox", str(st, "task_id"), fmt.Sprintf("r%d", number(st, "revision", 1)))
 }
 func (a *App) snapshot(st, r M, job string) {
+	review := M{}
+	for _, key := range []string{"document_id", "url"} {
+		if value := str(obj(st, "review_doc"), key); value != "" {
+			review[key] = value
+		}
+	}
 	base := filepath.Join(a.Root, "outbox", str(st, "task_id"))
 	if d := str(st, "assignment_dir"); d != "" {
 		base = filepath.Join(d, "outputs")
@@ -393,7 +399,7 @@ func (a *App) snapshot(st, r M, job string) {
 		submission = bundle
 		hash = digest(bundle)
 	}
-	merge(st, M{"output_dir": target, "ready": r["ready"], "summary": r["summary"], "blockers": r["blockers"], "artifacts": artifacts, "report": report, "report_sha256": digest(report), "presentation": obj(r, "presentation"), "submission": submission, "sha256": hash, "nonce": randomID(16), "deliveries": M{}, "review_doc": M{}, "links_synced": false, "links_retry_at": nil, "status": "delivery_pending"})
+	merge(st, M{"output_dir": target, "ready": r["ready"], "summary": r["summary"], "blockers": r["blockers"], "artifacts": artifacts, "report": report, "report_sha256": digest(report), "presentation": obj(r, "presentation"), "submission": submission, "sha256": hash, "nonce": randomID(16), "deliveries": M{}, "review_doc": review, "links_synced": false, "links_retry_at": nil, "status": "delivery_pending"})
 	for _, k := range []string{"card_message_id", "chat_id", "local_review", "delivery_mode"} {
 		delete(st, k)
 	}
