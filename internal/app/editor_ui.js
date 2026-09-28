@@ -167,6 +167,8 @@ $('suggestions').onclick=async e=>{
 $('reload').onclick=async()=>{
  try{await save();await api(endpoint('reload'),{version:view.draft.version});await loadTask(taskID);toast('旧草稿已备份，已载入新版正文。');}catch(e){error(e.message);}
 };
+$('preview-html').onclick=async()=>{try{await save();location.href=endpoint('report.html');}catch(e){error(e.message);}};
+$('download-html').onclick=async()=>{try{await save();const a=document.createElement('a');a.href=endpoint('report.html')+'?download=1';a.download='report.html';a.click();}catch(e){error(e.message);}};
 $('download-source').onclick=async()=>{try{await save();const a=document.createElement('a');a.href=endpoint('source.zip');a.download='report-source.zip';a.click();}catch(e){error(e.message);}};
 $('submit-open').onclick=async()=>{
  try{await save();$('related-artifacts').textContent=view.artifacts.join(' · ');$('submit-error').textContent='';$('submit-dialog').showModal();}catch(e){error(e.message);}

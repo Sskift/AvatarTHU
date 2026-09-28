@@ -492,6 +492,18 @@ func (a *App) editorHandler(token, host string) http.Handler {
 				w.Header().Set("Content-Disposition", `attachment; filename="report.md"`)
 				_, _ = io.WriteString(w, str(d, "markdown"))
 				return
+			case action == "report.html" && r.Method == "GET":
+				p := a.exportReportHTML(st)
+				body := string(readBytes(p))
+				w.Header().Set("Content-Security-Policy", reportPolicy+"; frame-ancestors 'none'")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				if r.URL.Query().Get("download") == "1" {
+					w.Header().Set("Content-Disposition", `attachment; filename="report.html"`)
+				} else {
+					body = strings.Replace(body, `<nav aria-label="报告目录">`, `<nav aria-label="报告目录"><a href="/#task=`+tid+`">← 返回编辑报告</a>`, 1)
+				}
+				_, _ = io.WriteString(w, body)
+				return
 			case action == "source.zip" && r.Method == "GET":
 				d := a.editorDraft(st)
 				var buffer bytes.Buffer

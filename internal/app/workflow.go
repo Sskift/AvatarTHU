@@ -201,6 +201,8 @@ func (a *App) writer(job, prompt string, plan M) M {
 		raw = a.engine(str(plan, "writer"), job, prompt, writerSchema, "writer", plan)
 	}
 	r := validateWriter(raw, job)
+	addReportHTML(r, job)
+	r = validateWriter(r, job)
 	writeJSON(filepath.Join(job, "result.json"), r)
 	writeJSON(completed, M{"finished_at": stamp(), "hashes": hashesFor(job, append(texts(r["files"]), "review.md"))})
 	return r

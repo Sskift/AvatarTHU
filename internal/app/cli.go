@@ -68,9 +68,18 @@ func Main(args []string) (code int) {
 	case "edit":
 		f := flag.NewFlagSet("edit", flag.ContinueOnError)
 		noOpen := f.Bool("no-open", false, "只输出编辑页地址")
+		exportHTML := f.Bool("export-html", false, "导出单文件 HTML 审阅稿")
 		check(f.Parse(args[1:]))
 		ensure(f.NArg() <= 1, "用法：avatarthu edit [--no-open] [作业编号]")
-		a.openEditor(f.Arg(0), *noOpen)
+		if *exportHTML {
+			ensure(f.NArg() == 1, "用法：avatarthu edit --export-html 作业编号")
+			st := readMap(a.taskPath(f.Arg(0)))
+			ensure(len(st) > 0, "找不到这份作业")
+			defer a.lock("editor-"+f.Arg(0), true)()
+			fmt.Println(a.exportReportHTML(st))
+		} else {
+			a.openEditor(f.Arg(0), *noOpen)
+		}
 	case "doctor":
 		okay := true
 		for _, r := range a.inspectPair(a.pairing()) {
