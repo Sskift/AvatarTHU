@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -208,9 +209,7 @@ func (a *App) newEditorRequest(st, in M, kind string) M {
 		selected := utf16Slice(str(d, "markdown"), start, end)
 		ensure(strings.TrimSpace(selected) != "" && len(selected) <= 32000, "请选择一段正文（最多 32 KB）")
 		ensure(str(r, "instruction") != "", "请说明这一段怎么改")
-		for _, q := range a.editorRequests(st) {
-			ensure(str(q, "kind") != "rewrite" || (str(q, "state") != "queued" && str(q, "state") != "running"), "已有一条局部修改正在处理，请稍候")
-		}
+		a.ensureEditorAvailable(st)
 		merge(r, M{"start": start, "end": end, "selected": selected, "base_markdown": d["markdown"]})
 		copyEditorImages(str(d, "source_dir"), filepath.Join(dir, "manuscript"))
 	} else {
@@ -293,9 +292,28 @@ func (a *App) processEditorRequests(selected string) {
 			if a.Ctx.Err() != nil {
 				return
 			}
-			r := readMap(p)
-			state := str(r, "state")
-			if state != "queued" && state != "running" {
+			var r M
+			func() {
+				defer a.lock("editor-"+tid, true)()
+				r = readMap(p)
+				state := str(r, "state")
+				if (state != "queued" && state != "running") || parseTime(str(r, "retry_at")).After(time.Now()) {
+					r = nil
+					return
+				}
+				if str(r, "kind") == "rewrite" {
+					if state == "running" {
+						r["recovered_at"] = stamp()
+					}
+					previous := number(r, "attempt", 0)
+					if previous == 0 && exists(filepath.Join(filepath.Dir(p), "job", "process.json")) {
+						previous = 1
+					}
+					merge(r, M{"state": "running", "stage": "准备报告和资料", "started_at": stamp(), "attempt": previous + 1, "error": "", "retry_at": "", "notice": ""})
+					writeJSON(p, r)
+				}
+			}()
+			if r == nil {
 				continue
 			}
 			e := attempt(func() {
@@ -306,20 +324,25 @@ func (a *App) processEditorRequests(selected string) {
 					r["state"] = "accepted"
 					return
 				}
-				if state == "running" {
-					panic(fmt.Errorf("上次局部修改被中断，草稿已保留；请重新发起修改"))
-				}
-				r["state"] = "running"
-				writeJSON(p, r)
 				st := readMap(a.taskPath(tid))
-				plan := obj(r, "plan")
-				job := filepath.Join(filepath.Dir(p), "job")
+				ensure(number(st, "revision", 1) == number(r, "base_revision", 0), "已有新版产物，请载入新版后重新选择修改段落")
+				plan := M{}
+				merge(plan, obj(r, "plan"))
+				plan["stage_timeout"] = min(number(plan, "stage_timeout", 7200), 600)
+				job := filepath.Join(filepath.Dir(p), fmt.Sprintf("job-attempt-%d", number(r, "attempt", 1)))
+				r["job"] = job
 				mkdir(job)
 				a.prepare(M{"description": st["description"], "folder": st["folder"], "courseware": st["courseware"]}, job)
+				for _, artifact := range objects(st["artifacts"]) {
+					source := str(artifact, "path")
+					copyFile(source, filepath.Join(job, "current-artifacts", filepath.Base(source)))
+				}
 				copyEditorImages(filepath.Join(filepath.Dir(p), "manuscript"), job)
 				writeFile(filepath.Join(job, "report.md"), []byte(str(r, "base_markdown")), 0600)
+				merge(r, M{"stage": "Agent 正在核对资料并修改文字", "timeout_seconds": plan["stage_timeout"]})
+				writeJSON(p, r)
 				prompt := `你是报告的局部编辑。只修改选中的原文，返回替换片段 replacement_markdown 和简短说明 summary。使用当前 CLI 默认模型，不调用其他 agent。
-report.md 是全文上下文，input/ 是原题和资料；只读这些材料。不要修改文件、生成整份报告、调用提交接口或访问上级目录。保留事实、数据、图片引用和必要格式，不编造结果。片段以外不改；不要在替换内容中附说明或代码围栏（原文是代码块时除外）。
+report.md 是全文上下文，input/ 是原题和资料，current-artifacts/ 是当前交付文件。核对涉及的代码或运行方式后再改表述；可以在本目录内解压产物供核对，不修改原始产物。不要生成整份报告、调用提交接口或访问上级目录。保留事实、数据、图片引用和必要格式，不编造结果。片段以外不改；不要在替换内容中附说明或代码围栏（原文是代码块时除外）。如果用户要求必须改代码才能满足，在 summary 中明确说明需要的代码修改，提示采用文字建议后通过“提交成品”同步代码；不能声称已改代码或验证了未运行的平台。
 选中的原文：
 ` + str(r, "selected") + "\n用户要求：\n" + str(r, "instruction")
 				result := a.engine(str(plan, "writer"), job, prompt, parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["replacement_markdown","summary"],"properties":{"replacement_markdown":{"type":"string"},"summary":{"type":"string"}}}`)), "局部修改", plan)
@@ -328,11 +351,58 @@ report.md 是全文上下文，input/ 是原题和资料；只读这些材料。
 				merge(r, M{"state": "ready", "replacement": replacement, "summary": str(result, "summary"), "completed_at": stamp()})
 			})
 			if e != nil {
-				merge(r, M{"state": "error", "error": safeError(e)})
+				a.failEditorRequest(r, e)
 			}
-			writeJSON(p, r)
+			func() {
+				defer a.lock("editor-"+tid, true)()
+				writeJSON(p, r)
+				if job := str(r, "job"); job != "" {
+					writeJSON(filepath.Join(job, "request-result.json"), r)
+				}
+			}()
 		}
 	}
+}
+func (a *App) failEditorRequest(r M, err error) {
+	if str(r, "kind") == "rewrite" && errors.Is(err, context.Canceled) {
+		merge(r, M{"state": "queued", "stage": "等待后台恢复", "notice": "后台停止时修改被中断，重新启动后自动继续。", "interrupted_at": stamp(), "error": ""})
+		return
+	}
+	failure := failureFields(err)
+	message := safeError(err)
+	if len(failure) > 0 {
+		message = str(failure, "tool") + "：" + str(failure, "reason")
+		if !boolean(failure, "retryable") {
+			message += "。" + str(failure, "action")
+		}
+	}
+	merge(r, M{"state": "error", "error": message, "failure": failure, "failed_at": stamp(), "failures": number(r, "failures", 0) + 1})
+	category := str(failure, "category")
+	if str(r, "kind") == "rewrite" && (category == "network" || category == "timeout") && boolean(failure, "retryable") && number(r, "failures", 0) < 3 {
+		merge(r, M{"state": "queued", "stage": "等待重试", "retry_at": time.Now().Add(time.Minute).Format(time.RFC3339), "notice": "暂时未完成，后台会自动重试；最多连续尝试 3 次。"})
+	}
+}
+func (a *App) ensureEditorAvailable(st M) {
+	for _, r := range a.editorRequests(st) {
+		ensure(str(r, "kind") != "rewrite" || (str(r, "state") != "queued" && str(r, "state") != "running"), "已有一条局部修改正在处理，请稍候")
+	}
+}
+func (a *App) retryEditorRequest(st M, id string) M {
+	ensure(editorRequestID.MatchString(id), "无效请求编号")
+	p := filepath.Join(a.editorDir(st), "requests", id, "request.json")
+	r := readMap(p)
+	ensure(str(r, "kind") == "rewrite", "只能重试局部修改")
+	if str(r, "state") == "queued" || str(r, "state") == "running" {
+		return r
+	}
+	ensure(str(r, "state") == "error", "此请求不需要重试")
+	d := a.editorDraft(st)
+	ensure(number(r, "base_revision", -1) == number(st, "revision", 0) && number(d, "base_revision", -2) == number(r, "base_revision", -1), "已有新版产物，请载入新版后重新选择修改段落")
+	a.ensureEditorAvailable(st)
+	merge(r, M{"state": "queued", "stage": "等待 Agent", "error": "", "notice": "已重新排队，保留原来的修改要求。", "retry_at": "", "failures": 0, "retry_requested_at": stamp()})
+	writeJSON(p, r)
+	a.wakeEditor()
+	return r
 }
 func (a *App) wakeEditor() {
 	if a.editorWake != nil {
@@ -471,6 +541,9 @@ func (a *App) editorHandler(token, host string) http.Handler {
 				result = a.newEditorRequest(st, in, "submit")
 			case action == "decide" && r.Method == "POST":
 				a.decideEditorSuggestion(st, in)
+				result = a.editorView(st)
+			case action == "retry" && r.Method == "POST":
+				a.retryEditorRequest(st, str(in, "id"))
 				result = a.editorView(st)
 			case action == "reload" && r.Method == "POST":
 				ensure(editorEditable(st), "新版产物尚未完成，请等处理结束后再载入")

@@ -195,10 +195,22 @@ func TestEditorRestartAndSourceZip(t *testing.T) {
 	a, st := editorFixture(t)
 	id := strings.Repeat("e", 32)
 	p := filepath.Join(a.editorDir(st), "requests", id, "request.json")
-	writeJSON(p, M{"id": id, "kind": "rewrite", "state": "running"})
+	d := a.editorDraft(st)
+	r := a.newEditorRequest(st, M{"id": id, "version": 1, "start": 0, "end": 4, "instruction": "简短些"}, "rewrite")
+	r["state"] = "running"
+	writeJSON(p, r)
+	writeJSON(filepath.Join(filepath.Dir(p), "job", "process.json"), M{"pid": -1})
+	writeFile(filepath.Join(filepath.Dir(p), "job", "codex.stderr.log"), []byte("old attempt"), 0600)
+	a.RunModel = func(string, string, string, M, string, M) M {
+		return M{"replacement_markdown": "# 实验", "summary": "简短标题"}
+	}
 	a.processEditorRequests("")
-	if str(readMap(p), "state") != "error" {
-		t.Fatal("interrupted request retried")
+	r = readMap(p)
+	if str(r, "state") != "ready" || number(r, "attempt", 0) != 2 || str(r, "recovered_at") == "" {
+		t.Fatal("interrupted request did not recover", r)
+	}
+	if string(readBytes(filepath.Join(filepath.Dir(p), "job", "codex.stderr.log"))) != "old attempt" || str(a.editorDraft(st), "markdown") != str(d, "markdown") {
+		t.Fatal("recovery overwrote old logs or draft")
 	}
 	src := filepath.Join(t.TempDir(), "report-source.zip")
 	f, e := os.Create(src)
@@ -216,6 +228,108 @@ func TestEditorRestartAndSourceZip(t *testing.T) {
 	extractEditorSource(src, dest)
 	if string(readBytes(filepath.Join(dest, "report.md"))) != "# Editable report" || !exists(filepath.Join(dest, "images", "a.png")) {
 		t.Fatal("source not extracted")
+	}
+}
+
+func TestEditorCancellationRequeuesWithoutNetworkFailure(t *testing.T) {
+	a, st := editorFixture(t)
+	ctx, cancel := context.WithCancel(a.Ctx)
+	a.Ctx = ctx
+	defer cancel()
+	r := a.newEditorRequest(st, M{"id": strings.Repeat("f", 32), "version": 1, "start": 0, "end": 4, "instruction": "缩短标题"}, "rewrite")
+	p := filepath.Join(a.editorDir(st), "requests", str(r, "id"), "request.json")
+	calls := 0
+	jobs := []string{}
+	a.RunModel = func(tool, job, prompt string, schema M, role string, plan M) M {
+		calls++
+		jobs = append(jobs, job)
+		if !exists(filepath.Join(job, "current-artifacts", filepath.Base(str(objects(st["artifacts"])[0], "path")))) {
+			t.Fatal("missing deliverable context")
+		}
+		if calls == 1 {
+			cancel()
+			panic(context.Canceled)
+		}
+		return M{"replacement_markdown": "# 实验", "summary": "缩短标题"}
+	}
+	a.processEditorRequests("")
+	if r = readMap(p); str(r, "state") != "queued" || str(r, "error") != "" || number(r, "failures", 0) != 0 {
+		t.Fatal("cancelled request was marked failed", r)
+	}
+	if str(readMap(a.data(str(obj(r, "plan"), "writer")+"-execution.json")), "state") != "interrupted" {
+		t.Fatal("cancellation marked CLI unhealthy")
+	}
+	a.Ctx = context.Background()
+	a.processEditorRequests("")
+	if str(readMap(p), "state") != "ready" || calls != 2 || jobs[0] == jobs[1] || !exists(filepath.Join(jobs[0], "request-result.json")) {
+		t.Fatal("retry did not preserve separate attempts")
+	}
+}
+
+func TestEditorTransientRetryLimitAndManualRecovery(t *testing.T) {
+	a, st := editorFixture(t)
+	id := strings.Repeat("9", 32)
+	r := a.newEditorRequest(st, M{"id": id, "version": 1, "start": 0, "end": 4, "instruction": "缩短标题"}, "rewrite")
+	p := filepath.Join(a.editorDir(st), "requests", id, "request.json")
+	calls := 0
+	a.RunModel = func(tool, job, prompt string, schema M, role string, plan M) M {
+		calls++
+		if calls <= 3 {
+			panic(diagnosticError(tool, "tls handshake eof", "log"))
+		}
+		return M{"replacement_markdown": "# 实验", "summary": "缩短标题"}
+	}
+	for i := 1; i <= 3; i++ {
+		a.processEditorRequests("")
+		r = readMap(p)
+		if calls != i || strings.Contains(str(r, "error"), "15 分钟") {
+			t.Fatal("wrong execution count or misleading retry notice", r)
+		}
+		if i < 3 {
+			if str(r, "state") != "queued" || !parseTime(str(r, "retry_at")).After(time.Now()) {
+				t.Fatal("transient error not scheduled", r)
+			}
+			a.processEditorRequests("")
+			if calls != i {
+				t.Fatal("retried before scheduled time")
+			}
+			r["retry_at"] = time.Now().Add(-time.Minute).Format(time.RFC3339)
+			writeJSON(p, r)
+		} else if str(r, "state") != "error" {
+			t.Fatal("automatic retries did not stop", r)
+		}
+	}
+	path := "/api/task/" + str(st, "task_id") + "/retry"
+	editorResult(t, editorCall(t, a, path, M{"id": id}))
+	editorResult(t, editorCall(t, a, path, M{"id": id}))
+	a.processEditorRequests("")
+	if calls != 4 || str(readMap(p), "state") != "ready" {
+		t.Fatal("manual retry failed or duplicated")
+	}
+	st = readMap(a.taskPath(str(st, "task_id")))
+	if str(st, "status") != "awaiting" || number(st, "revision", 0) != 1 || str(st, "card_message_id") != "card1" {
+		t.Fatal("retry changed published task", st)
+	}
+}
+
+func TestEditorAuthenticationErrorAndCLIRetry(t *testing.T) {
+	a, st := editorFixture(t)
+	id := strings.Repeat("8", 32)
+	a.newEditorRequest(st, M{"id": id, "version": 1, "start": 0, "end": 4, "instruction": "缩短标题"}, "rewrite")
+	p := filepath.Join(a.editorDir(st), "requests", id, "request.json")
+	calls := 0
+	a.RunModel = func(tool, job, prompt string, schema M, role string, plan M) M {
+		calls++
+		panic(diagnosticError(tool, "401 unauthorized", "log"))
+	}
+	a.processEditorRequests("")
+	a.processEditorRequests("")
+	r := readMap(p)
+	if str(r, "state") != "error" || calls != 1 || !strings.Contains(str(r, "error"), "完成登录") {
+		t.Fatal("authentication failure was not actionable", r)
+	}
+	if a.retryTool(str(obj(r, "plan"), "writer")) != 1 || calls != 1 || str(readMap(p), "state") != "queued" {
+		t.Fatal("CLI retry did not queue failed edit")
 	}
 }
 

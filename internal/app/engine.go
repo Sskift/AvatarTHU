@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,6 +76,10 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 			if !ok {
 				err = fmt.Errorf("%v", value)
 			}
+			if errors.Is(err, context.Canceled) {
+				writeJSON(a.data(executor+"-execution.json"), M{"state": "interrupted", "tool": executor, "phase": role, "job": job, "time": stamp(), "reason": "后台停止，执行被中断"})
+				panic(err)
+			}
 			if len(failureFields(err)) == 0 {
 				err = diagnosticError(executor, err.Error(), executionLog(job, executor))
 			}
@@ -83,6 +88,7 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 		}
 		writeJSON(a.data(executor+"-execution.json"), M{"state": "succeeded", "tool": executor, "phase": role, "job": job, "time": stamp()})
 	}()
+	check(a.Ctx.Err())
 	writeJSON(a.data(executor+"-execution.json"), M{"state": "running", "tool": executor, "phase": role, "job": job, "time": stamp()})
 	if a.RunModel != nil {
 		return a.RunModel(executor, job, prompt, schema, role, plan)
@@ -122,11 +128,14 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 	e = cmd.Wait()
 	check(log.Close())
 	check(stderr.Close())
+	if ctx.Err() == context.Canceled {
+		panic(context.Canceled)
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		panic(&toolFailure{Tool: executor, Category: "timeout", Reason: "本次执行超过设定时长", Action: "可重试或缩小修改范围", Log: errors, Retryable: true})
+	}
 	if e != nil {
 		msg := tail(errors, 16000) + tail(output, 16000) + e.Error()
-		if ctx.Err() != nil {
-			msg += ctx.Err().Error()
-		}
 		panic(diagnosticError(executor, msg, errors))
 	}
 	var result M

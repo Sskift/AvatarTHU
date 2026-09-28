@@ -3,18 +3,25 @@ const $ = id => document.getElementById(id);
 let editingRange = null;
 let taskID = '', view, markdown = '', blocks = [], activeBlock = -1, chosen = null, mode = 'paper';
 let dirty = false, saveTimer, renderTimer, rendering = 0, savePromise = null, conflict = false, submitting = false;
-let submitID = '', rewriteID = '', pollBusy = false, lastReady = '';
+let submitID = '', rewriteID = '', pollBusy = false, lastReady = '', pollError = '';
 const phaseNames = {awaiting:'待你审阅',needs_student:'需要修改',revision_ready:'已排队',queued:'已排队',working:'更新产物中',rewriting:'按复审意见修改中',reviewing:'独立复审中',delivery_pending:'发布产物中',failed:'处理遇到问题',submitted:'已提交学堂',approval_invalid:'需要重新确认',closed_remote:'课程作业已关闭',submission_unknown:'提交结果待确认'};
 const escape = text => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const requestID = () => crypto.randomUUID().replaceAll('-','');
 function error(message) { $('error').textContent = message; $('error').hidden = !message; }
 function toast(message) { $('toast').textContent=message; $('toast').hidden=false; setTimeout(()=>{$('toast').hidden=true;},3500); }
 async function api(path, body) {
- const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
- const text=await response.text(); let data; try{data=JSON.parse(text);}catch{data={error:text};}
- if(!response.ok) throw new Error(data.error || '后台暂时不可用'); return data;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+ try {
+  const response=await fetch(path,{signal:controller.signal,method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+  const text=await response.text(); let data; try{data=JSON.parse(text);}catch{data={error:text};}
+  if(!response.ok) throw new Error(data.error || '后台暂时不可用'); return data;
+ } catch(e) {
+  if(e.name==='AbortError'||e instanceof TypeError)throw new Error('暂时连不上后台，正在尝试重新连接。文字仍保留在页面中；如果刚重启后台，请从菜单栏重新打开编辑页。');
+  throw e;
+ } finally {clearTimeout(timer);}
 }
 const endpoint = action => '/api/task/'+taskID+(action?'/'+action:'');
+new ResizeObserver(entries=>document.documentElement.style.setProperty('--topbar-height',entries[0].target.offsetHeight+'px')).observe(document.querySelector('.topbar'));
 function splitBlocks(text) {
  const list=[]; let start=0,pos=0,fence='';
  for(const line of text.match(/[^\n]*\n|[^\n]+$/g)||[]) {
@@ -112,15 +119,43 @@ function updateStatus() {
 function showSuggestions() {
  const requests=view.requests.filter(r=>r.kind==='rewrite');
  $('suggestions').innerHTML=requests.slice(0,4).map(r=>{
-  const titles={queued:'已排队，等待 Agent',running:'Agent 正在修改这一段',ready:'建议已就绪',applied:'已采用到草稿',dismissed:'已保留原文',error:'这次修改未完成'};
-  let body='<div class="suggestion"><h3>'+escape(titles[r.state]||r.state)+'</h3><p>'+escape(r.instruction)+'</p>';
+  const status=rewriteStatus(r);
+  let body='<div class="suggestion" data-request="'+r.id+'"><h3>'+escape(status.title)+'</h3><p class="micro">'+escape(status.detail)+'</p><p>'+escape(r.instruction)+'</p>';
   if(r.state==='ready')body+='<details open><summary>原文</summary><pre>'+escape(r.selected)+'</pre></details><pre>'+escape(r.replacement)+'</pre><p class="micro">'+escape(r.summary)+'</p><div class="buttons"><button data-decide="dismiss" data-id="'+r.id+'">保留原文</button><button class="primary" data-decide="accept" data-id="'+r.id+'">采用建议</button></div>';
   if(r.error)body+='<p class="error">'+escape(r.error)+'</p>';
+  if(r.state==='error')body+='<button data-retry="'+r.id+'">重新尝试</button>';
   return body+'</div>';
  }).join('');
  const ready=requests.find(r=>r.state==='ready');if(ready&&ready.id!==lastReady){lastReady=ready.id;document.querySelector('.inspector').scrollTop=0;}
  const running=requests.some(r=>r.state==='queued'||r.state==='running');
  $('rewrite').disabled=running||(!chosen&&activeBlock<0);$('rewrite').textContent=running?'等待 Agent 返回建议…':'让 Agent 改这一段';
+ const current=requests.find(r=>r.state==='queued'||r.state==='running')||requests[0];
+ $('rewrite-status').hidden=!current||['applied','dismissed'].includes(current.state);
+ if(current){
+  const status=rewriteStatus(current);$('rewrite-title').textContent=status.title;$('rewrite-detail').textContent=status.detail;
+  $('rewrite-status').dataset.state=current.state;$('rewrite-jump').dataset.id=current.id;
+  $('retry-rewrite').hidden=current.state!=='error';$('retry-rewrite').dataset.id=current.id;
+ }
+}
+function elapsed(since) {
+ const seconds=Math.max(0,Math.floor((Date.now()-Date.parse(since))/1000));
+ if(!Number.isFinite(seconds))return '';
+ return seconds<60?seconds+' 秒':Math.floor(seconds/60)+' 分 '+seconds%60+' 秒';
+}
+function rewriteStatus(r) {
+ const titles={queued:'已排队，等待 Agent',running:'Agent 正在修改这一段',ready:'修改建议已就绪',applied:'已采用到草稿',dismissed:'已保留原文',error:'这次修改未完成'};
+ let title=titles[r.state]||r.state,detail=r.notice||'';
+ if(r.state==='running')detail=(r.stage||'正在修改文字')+' · 已运行 '+elapsed(r.started_at||r.created_at)+(r.attempt>1?' · 第 '+r.attempt+' 次尝试':'');
+ if(r.state==='queued') {
+  if(r.retry_at){title='暂时未完成，等待自动重试';detail='预计 '+new Date(r.retry_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+' 后重试（最多连续 3 次）';}
+  else detail=detail||'等待现有作业处理结束 · 已等待 '+elapsed(r.retry_requested_at||r.created_at);
+ }
+ if(r.state==='ready')detail='查看原文和建议，采用后才会写入草稿。';
+ if(r.state==='error')detail=r.error||'草稿和修改要求已保留，可重新尝试。';
+ return {title,detail};
+}
+async function retryRewrite(id) {
+ try{await api(endpoint('retry'),{id});await poll();toast('已重新排队，原来的修改要求已保留。');}catch(e){error(e.message);}
 }
 async function loadTask(id) {
  if(taskID&&dirty)await save();
@@ -143,7 +178,8 @@ async function poll() {
   if(result.draft.version!==view.draft.version&&!dirty){view=result;markdown=result.draft.markdown;activeBlock=-1;chosen=null;$('block-tools').hidden=true;$('markdown').value=markdown;await render();}
   else {view.task=result.task;view.requests=result.requests;view.writer=result.writer;view.reviewer=result.reviewer;view.artifacts=result.artifacts;}
   updateStatus();
- }catch(e){error(e.message);}finally{pollBusy=false;}
+  if(pollError&&$('error').textContent===pollError)error('');pollError='';
+ }catch(e){pollError=e.message;error(e.message);}finally{pollBusy=false;}
 }
 $('paper').addEventListener('click',e=>{if(e.target.closest('a'))return;const el=e.target.closest('[data-block]');if(el)showBlock(Number(el.dataset.block));});
 $('paper').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-block]'))showBlock(Number(e.target.dataset.block));});
@@ -161,8 +197,14 @@ $('rewrite').onclick=async()=>{
  }catch(e){error(e.message);$('rewrite').disabled=false;}
 };
 $('suggestions').onclick=async e=>{
+ const retry=e.target.closest('[data-retry]');if(retry){retry.disabled=true;await retryRewrite(retry.dataset.retry);retry.disabled=false;return;}
  const b=e.target.closest('[data-decide]');if(!b)return;
  try{await save();b.disabled=true;const result=await api(endpoint('decide'),{id:b.dataset.id,action:b.dataset.decide});view=result;markdown=result.draft.markdown;activeBlock=-1;chosen=null;$('block-tools').hidden=true;$('markdown').value=markdown;await render();updateStatus();toast(b.dataset.decide==='accept'?'已采用建议并保存草稿':'已保留原文');}catch(err){error(err.message);b.disabled=false;}
+};
+$('retry-rewrite').onclick=async()=>{const b=$('retry-rewrite');b.disabled=true;await retryRewrite(b.dataset.id);b.disabled=false;};
+$('rewrite-jump').onclick=()=>{
+ const panel=document.querySelector('.inspector'),item=document.querySelector('[data-request="'+$('rewrite-jump').dataset.id+'"]');
+ if(item){panel.scrollTop=0;item.scrollIntoView({behavior:'smooth',block:'center'});}
 };
 $('reload').onclick=async()=>{
  try{await save();await api(endpoint('reload'),{version:view.draft.version});await loadTask(taskID);toast('旧草稿已备份，已载入新版正文。');}catch(e){error(e.message);}

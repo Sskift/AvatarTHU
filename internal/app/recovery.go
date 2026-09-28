@@ -85,6 +85,27 @@ func (a *App) retryTool(tool string) int {
 	}
 	count := 0
 	for _, task := range a.tasks() {
+		func() {
+			defer a.lock("editor-"+str(task, "task_id"), true)()
+			requests := a.editorRequests(task)
+			for _, request := range requests {
+				if str(request, "kind") == "rewrite" && (str(request, "state") == "queued" || str(request, "state") == "running") {
+					return
+				}
+			}
+			for _, request := range requests {
+				if str(request, "kind") != "rewrite" || str(request, "state") != "error" {
+					continue
+				}
+				r := readMap(filepath.Join(a.editorDir(task), "requests", str(request, "id"), "request.json"))
+				if str(obj(r, "plan"), "writer") == tool && number(r, "base_revision", -1) == number(task, "revision", 0) {
+					if e := attempt(func() { a.retryEditorRequest(task, str(r, "id")) }); e == nil {
+						count++
+					}
+					return
+				}
+			}
+		}()
 		if str(task, "status") != "failed" || str(obj(task, "failure"), "tool") != tool {
 			continue
 		}
@@ -99,7 +120,7 @@ func (a *App) retryTool(tool string) int {
 			count++
 		}()
 	}
-	fmt.Printf("已恢复 %s 的 %d 项失败作业；后台下一分钟从已完成阶段继续。尚未发出模型请求，实际成功后才清除执行异常。\n", tool, count)
+	fmt.Printf("已恢复 %s 的 %d 项失败作业或局部修改；后台下一分钟继续处理。尚未发出模型请求，实际成功后才清除执行异常。\n", tool, count)
 	if !a.serviceLoaded() {
 		fmt.Println("后台未启动，请运行 avatarthu service start。")
 	}
