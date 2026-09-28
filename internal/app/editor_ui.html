@@ -11,15 +11,17 @@
 <div class="notice" id="stale" hidden><span id="stale-message">已有新版产物。当前草稿仍然保留。</span><button id="reload">备份草稿并载入新版</button></div>
 <div id="handoff-status" class="handoff" hidden aria-live="polite"></div>
 <div class="editor-toolbar"><div class="tabs" role="tablist" aria-label="报告视图"><button role="tab" aria-selected="true" data-mode="paper">正文</button><button role="tab" aria-selected="false" data-mode="markdown">Markdown</button><button role="tab" aria-selected="false" data-mode="diff">修改对照</button></div><span id="view-hint">点击一段文字即可修改</span></div>
+<div id="selection-toolbar" class="selection-toolbar"><button id="multi-select" aria-pressed="false">多段选择</button><span id="selection-count">可拖选跨段文字，或按住 Shift 连选</span><button id="selection-clear" hidden>取消选择</button><button id="selection-discuss" hidden>一起提修改意见 →</button></div>
 <div id="paper" class="paper"></div>
 <div id="markdown-pane" hidden><label class="sr-only" for="markdown">报告 Markdown</label><textarea id="markdown" spellcheck="false"></textarea><button id="select-source">让 Agent 修改选中文字 →</button></div>
 <div id="diff-pane" class="paper" hidden></div>
 </main>
 <aside class="inspector"><div class="inspector-title"><h2>局部修改</h2><span class="badge">你确认后替换</span></div><p class="muted" id="selection-hint">点击正文中的一段，直接改字；或写下要求，让 Agent 提出建议。</p>
-<div id="suggestions" aria-live="polite"></div>
+<div id="multi-tools" hidden><strong id="multi-summary"></strong><p class="micro">以下段落交给同一个 Agent 一起修改；未选中的内容保持原样。</p><ol id="selected-blocks"></ol></div>
 <div id="block-tools" hidden><label for="block-text">选中的段落 <span>可直接编辑</span></label><textarea id="block-text" spellcheck="false"></textarea><p class="micro">选中文字可缩小修改范围，不选则修改整段。</p></div>
 <div id="quote-wrap" hidden><label>本次修改范围</label><blockquote id="selected-quote"></blockquote></div>
 <label for="instruction">想怎么改？</label><textarea id="instruction" placeholder="例如：删掉开头铺垫，直接说操作步骤。保留命令和结果。" rows="4"></textarea><div class="chips"><button data-prompt="更简短，删掉重复表达，保留事实和必要步骤。">更简短</button><button data-prompt="用自然的学生口吻改写，保留事实，不添加评价或总结。">更自然</button><button data-prompt="整理为清楚的有序步骤，保留操作和结果。">整理步骤</button></div><button class="primary wide" id="rewrite" disabled>让 Agent 改这一段</button>
+<div id="suggestions" aria-live="polite"></div>
 </aside>
 </div>
 <dialog id="submit-dialog"><form method="dialog"><button class="dialog-close" aria-label="关闭">×</button></form><div class="eyebrow">把定稿交给 Agent</div><h2>提交成品，同步其他产物</h2><p>Agent 接收这份正文，更新相关文件，再交给独立复审。处理进度会显示在此页。</p><div class="deliverables"><strong>本次同步</strong><div>报告 PDF / HTML · Markdown 与截图包</div><div id="related-artifacts"></div></div><label for="submit-note">补充说明 <span>选填</span></label><textarea id="submit-note" rows="3" placeholder="例如：正文措辞按这一版，程序功能保持原样。"></textarea><p class="micro">这里提交给 Agent。提交到网络学堂仍由你在最新飞书卡片上确认。</p><button class="primary wide" id="submit-final">确认定稿并开始同步</button><p id="submit-error" role="alert"></p></dialog>

@@ -154,7 +154,8 @@ func TestEditorRejectsChangedSelectionAndOldRevision(t *testing.T) {
 	d := a.editorDraft(st)
 	id := strings.Repeat("c", 32)
 	p := filepath.Join(a.editorDir(st), "requests", id, "request.json")
-	writeJSON(p, M{"id": id, "kind": "rewrite", "state": "ready", "selected": "先打开程序", "replacement": "双击程序", "base_revision": 1, "base_markdown": d["markdown"]})
+	start := len(utf16.Encode([]rune(strings.Split(str(d, "markdown"), "先打开程序")[0])))
+	writeJSON(p, M{"id": id, "kind": "rewrite", "state": "ready", "selected": "先打开程序", "replacement": "双击程序", "base_revision": 1, "base_markdown": d["markdown"], "start": start, "end": start + 5})
 	a.saveEditorDraft(st, M{"version": 1, "markdown": "我把这段完全重写了。"})
 	expectError(t, "原文已改动", func() { a.decideEditorSuggestion(st, M{"id": id, "action": "accept"}) })
 	st["revision"] = 2

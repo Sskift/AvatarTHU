@@ -205,12 +205,19 @@ func (a *App) newEditorRequest(st, in M, kind string) M {
 	r := M{"id": id, "kind": kind, "state": "queued", "created_at": time.Now().UTC().Format(time.RFC3339Nano), "base_revision": st["revision"], "draft_version": d["version"], "instruction": strings.TrimSpace(str(in, "instruction")), "plan": a.pairing()}
 	ensure(len(str(r, "instruction")) <= 12000, "修改要求过长")
 	if kind == "rewrite" {
-		start, end := number(in, "start", -1), number(in, "end", -1)
-		selected := utf16Slice(str(d, "markdown"), start, end)
-		ensure(strings.TrimSpace(selected) != "" && len(selected) <= 32000, "请选择一段正文（最多 32 KB）")
-		ensure(str(r, "instruction") != "", "请说明这一段怎么改")
+		md := str(d, "markdown")
+		if _, multiple := in["ranges"]; multiple {
+			segments := editorSegments(md, objects(in["ranges"]))
+			r["segments"] = segments
+		} else {
+			start, end := number(in, "start", -1), number(in, "end", -1)
+			selected := utf16Slice(md, start, end)
+			ensure(strings.TrimSpace(selected) != "" && len(selected) <= 32000, "请选择正文（合计最多 32 KB）")
+			merge(r, M{"start": start, "end": end, "selected": selected})
+		}
+		ensure(str(r, "instruction") != "", "请说明选中的内容怎么改")
 		a.ensureEditorAvailable(st)
-		merge(r, M{"start": start, "end": end, "selected": selected, "base_markdown": d["markdown"]})
+		r["base_markdown"] = md
 		copyEditorImages(str(d, "source_dir"), filepath.Join(dir, "manuscript"))
 	} else {
 		ensure(editorEditable(st), "当前作业正在处理或已提交，暂时不能接收定稿")
@@ -249,29 +256,8 @@ func (a *App) decideEditorSuggestion(st, in M) M {
 	if action == "accept" {
 		d := a.editorDraft(st)
 		md := str(d, "markdown")
-		old := str(r, "selected")
 		ensure(number(d, "base_revision", 0) == number(r, "base_revision", -1), "此建议属于旧版报告，请重新提出修改")
-		var next string
-		if md == str(r, "base_markdown") {
-			u := utf16.Encode([]rune(md))
-			next = string(utf16.Decode(u[:number(r, "start", 0)])) + str(r, "replacement") + string(utf16.Decode(u[number(r, "end", 0):]))
-		} else {
-			ensure(strings.Count(md, old) == 1, "选中的原文已改动或出现多次。保留当前草稿，请重新选择这段调用 Agent。")
-			base := str(r, "base_markdown")
-			units := utf16.Encode([]rune(base))
-			start, end := number(r, "start", 0), number(r, "end", 0)
-			ensure(start >= 0 && end <= len(units) && end >= start, "建议选区无效，请重新发起")
-			before, after := []rune(string(utf16.Decode(units[:start]))), []rune(string(utf16.Decode(units[end:])))
-			if len(before) > 60 {
-				before = before[len(before)-60:]
-			}
-			if len(after) > 60 {
-				after = after[:60]
-			}
-			at := strings.Index(md, old)
-			ensure(strings.HasSuffix(md[:at], string(before)) && strings.HasPrefix(md[at+len(old):], string(after)), "原段落附近的文字已改变，无法确认修改位置。请重新选择这段调用 Agent。")
-			next = strings.Replace(md, old, str(r, "replacement"), 1)
-		}
+		next := applyEditorReplacements(md, r)
 		a.saveEditorDraft(st, M{"version": d["version"], "markdown": next})
 		r["state"] = "applied"
 	} else {
@@ -341,14 +327,10 @@ func (a *App) processEditorRequests(selected string) {
 				writeFile(filepath.Join(job, "report.md"), []byte(str(r, "base_markdown")), 0600)
 				merge(r, M{"stage": "Agent 正在核对资料并修改文字", "timeout_seconds": plan["stage_timeout"]})
 				writeJSON(p, r)
-				prompt := `你是报告的局部编辑。只修改选中的原文，返回替换片段 replacement_markdown 和简短说明 summary。使用当前 CLI 默认模型，不调用其他 agent。
-report.md 是全文上下文，input/ 是原题和资料，current-artifacts/ 是当前交付文件。核对涉及的代码或运行方式后再改表述；可以在本目录内解压产物供核对，不修改原始产物。不要生成整份报告、调用提交接口或访问上级目录。保留事实、数据、图片引用和必要格式，不编造结果。片段以外不改；不要在替换内容中附说明或代码围栏（原文是代码块时除外）。如果用户要求必须改代码才能满足，在 summary 中明确说明需要的代码修改，提示采用文字建议后通过“提交成品”同步代码；不能声称已改代码或验证了未运行的平台。
-选中的原文：
-` + str(r, "selected") + "\n用户要求：\n" + str(r, "instruction")
-				result := a.engine(str(plan, "writer"), job, prompt, parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["replacement_markdown","summary"],"properties":{"replacement_markdown":{"type":"string"},"summary":{"type":"string"}}}`)), "局部修改", plan)
-				replacement, ok := result["replacement_markdown"].(string)
-				ensure(ok && len(replacement) <= 64000, "Agent 未返回有效的替换片段")
-				merge(r, M{"state": "ready", "replacement": replacement, "summary": str(result, "summary"), "completed_at": stamp()})
+				prompt, schema := editorRewritePrompt(r)
+				result := a.engine(str(plan, "writer"), job, prompt, schema, "局部修改", plan)
+				storeEditorReplacements(r, result)
+				merge(r, M{"state": "ready", "summary": str(result, "summary"), "completed_at": stamp()})
 			})
 			if e != nil {
 				a.failEditorRequest(r, e)

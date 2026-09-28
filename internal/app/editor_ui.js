@@ -1,6 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 let editingRange = null;
+let multiple = false, selectedBlocks = new Set(), selectionAnchor = -1;
 let taskID = '', view, markdown = '', blocks = [], activeBlock = -1, chosen = null, mode = 'paper';
 let dirty = false, saveTimer, renderTimer, rendering = 0, savePromise = null, conflict = false, submitting = false;
 let submitID = '', rewriteID = '', pollBusy = false, lastReady = '', pollError = '';
@@ -37,7 +38,8 @@ async function render() {
  const id=++rendering, snapshot=markdown, currentTask=taskID; blocks=splitBlocks(snapshot);
  const rendered=await api(endpoint('render'),{markdown:snapshot,blocks:blocks.map(b=>b.text)});
  if(id!==rendering || currentTask!==taskID)return;
- $('paper').innerHTML=blocks.length?rendered.blocks.map((html,i)=>'<section class="report-block'+(i===activeBlock?' selected':'')+'" tabindex="0" data-block="'+i+'">'+html+'</section>').join(''):'<p class="muted">这版还没有 Markdown 报告。切换到 Markdown 粘贴正文，或等待下一版产出可编辑源文件。</p>';
+ $('paper').innerHTML=blocks.length?rendered.blocks.map((html,i)=>'<section class="report-block" tabindex="0" data-block="'+i+'"><button class="block-picker" data-toggle-block="'+i+'" aria-label="选择第 '+(i+1)+' 段" aria-pressed="false">✓</button>'+html+'</section>').join(''):'<p class="muted">这版还没有 Markdown 报告。切换到 Markdown 粘贴正文，或等待下一版产出可编辑源文件。</p>';
+ updateSelectionUI();
  const headings=blocks.map((b,i)=>({i,match:b.text.match(/^#{1,3}\s+(.+)/)})).filter(h=>h.match);
  $('outline').innerHTML=headings.map(h=>'<button data-jump="'+h.i+'">'+escape(h.match[1])+'</button>').join('');
  renderDiff();
@@ -73,9 +75,52 @@ async function save() {
 }
 function showBlock(index) {
  const b=blocks[index];if(!b)return;
+ multiple=false;selectedBlocks.clear();selectionAnchor=index;
  activeBlock=index;editingRange={start:b.start,end:b.end,ending:b.text.match(/\s*$/)?.[0]||''};chosen=null;$('block-text').value=b.text.trimEnd();$('block-tools').hidden=false;$('quote-wrap').hidden=true;
- $('selection-hint').textContent='直接修改下面的文字，正文预览与草稿自动同步。';$('rewrite').disabled=false;
- document.querySelectorAll('.report-block').forEach(el=>el.classList.toggle('selected',Number(el.dataset.block)===index));
+ $('selection-hint').textContent='直接修改下面的文字，正文预览与草稿自动同步。';updateSelectionUI();updateRewriteButton();
+}
+function resetSelection() {
+ activeBlock=-1;chosen=null;editingRange=null;selectedBlocks.clear();selectionAnchor=-1;
+ $('block-tools').hidden=true;$('quote-wrap').hidden=true;updateSelectionUI();
+}
+function updateSelectionUI() {
+ $('paper').classList.toggle('multi-select',multiple);
+ $('multi-select').setAttribute('aria-pressed',String(multiple));$('multi-select').textContent=multiple?'结束多选':'多段选择';
+ const count=selectedBlocks.size;
+ $('selection-count').textContent=multiple?(count?'已选 '+count+' 段，可继续勾选或按住 Shift 连选':'点击段落或勾选框，可选择不相邻的段落'):'可拖选跨段文字，或按住 Shift 连选';
+ $('selection-clear').hidden=!count;$('selection-discuss').hidden=!count;
+ $('multi-tools').hidden=!multiple||!count;
+ $('multi-summary').textContent='共同修改 '+count+' 段';
+ $('selected-blocks').innerHTML=[...selectedBlocks].sort((a,b)=>a-b).map(i=>'<li><span>第 '+(i+1)+' 段</span><p>'+escape(blocks[i].text.trim())+'</p><button data-unselect="'+i+'" aria-label="取消第 '+(i+1)+' 段">×</button></li>').join('');
+ document.querySelectorAll('.report-block').forEach(el=>{
+  const i=Number(el.dataset.block),selected=multiple?selectedBlocks.has(i):i===activeBlock;
+  el.classList.toggle('selected',selected);el.querySelector('.block-picker').setAttribute('aria-pressed',String(selectedBlocks.has(i)));
+ });
+}
+function toggleBlock(index,extend=false) {
+ if(!multiple&&activeBlock>=0)selectedBlocks.add(activeBlock);
+ multiple=true;
+ if(extend&&selectionAnchor>=0){for(let i=Math.min(selectionAnchor,index);i<=Math.max(selectionAnchor,index);i++)selectedBlocks.add(i);}
+ else {if(selectedBlocks.has(index))selectedBlocks.delete(index);else selectedBlocks.add(index);selectionAnchor=index;}
+ showMultipleSelection();
+}
+function showMultipleSelection() {
+ activeBlock=-1;editingRange=null;chosen=null;$('block-tools').hidden=true;$('quote-wrap').hidden=true;
+ $('selection-hint').textContent='写一条共同的修改要求，Agent 会结合选中段落统一调整。';
+ updateSelectionUI();updateRewriteButton();
+}
+function capturePaperSelection() {
+ const selection=window.getSelection();
+ if(!selection||selection.isCollapsed||!selection.rangeCount||!$('paper').contains(selection.anchorNode)||!$('paper').contains(selection.focusNode))return false;
+ const range=selection.getRangeAt(0),indices=[...$('paper').querySelectorAll('[data-block]')].filter(el=>range.intersectsNode(el)).map(el=>Number(el.dataset.block));
+ if(indices.length<2)return false;
+ multiple=true;selectedBlocks=new Set(indices);selectionAnchor=indices[0];selection.removeAllRanges();showMultipleSelection();return true;
+}
+function updateRewriteButton() {
+ const running=view?.requests.some(r=>r.kind==='rewrite'&&(r.state==='queued'||r.state==='running'));
+ const count=selectedBlocks.size;
+ $('rewrite').disabled=running||(mode==='paper'&&multiple?!count:!chosen&&activeBlock<0);
+ $('rewrite').textContent=running?'等待 Agent 返回建议…':multiple&&mode==='paper'?'让 Agent 一起修改'+(count?'这 '+count+' 段':'所选内容'):'让 Agent 修改选中内容';
 }
 function updateBlock() {
  const b=editingRange;if(!b)return;
@@ -85,6 +130,10 @@ function updateBlock() {
  b.end=b.start+replacement.length;chosen=null;changed(next);blocks=splitBlocks(next);
 }
 function captureSelection() {
+ if(mode==='paper'&&multiple){
+  if(!selectedBlocks.size)throw new Error('请先选择要一起修改的段落');
+  return {ranges:[...selectedBlocks].sort((a,b)=>a-b).map(i=>({start:blocks[i].start,end:blocks[i].start+blocks[i].text.trimEnd().length}))};
+ }
  if(mode==='markdown') {
   const el=$('markdown'); if(el.selectionEnd<=el.selectionStart)throw new Error('请先在 Markdown 中选中要修改的文字');
   chosen={start:el.selectionStart,end:el.selectionEnd};
@@ -121,14 +170,16 @@ function showSuggestions() {
  $('suggestions').innerHTML=requests.slice(0,4).map(r=>{
   const status=rewriteStatus(r);
   let body='<div class="suggestion" data-request="'+r.id+'"><h3>'+escape(status.title)+'</h3><p class="micro">'+escape(status.detail)+'</p><p>'+escape(r.instruction)+'</p>';
-  if(r.state==='ready')body+='<details open><summary>原文</summary><pre>'+escape(r.selected)+'</pre></details><pre>'+escape(r.replacement)+'</pre><p class="micro">'+escape(r.summary)+'</p><div class="buttons"><button data-decide="dismiss" data-id="'+r.id+'">保留原文</button><button class="primary" data-decide="accept" data-id="'+r.id+'">采用建议</button></div>';
+  if(r.state==='ready'){
+   const segments=r.segments||[r];
+   body+=segments.map((s,i)=>(r.segments?'<div class="segment-label">片段 '+(i+1)+' / '+segments.length+'</div>':'')+'<details open><summary>原文</summary><pre>'+escape(s.selected)+'</pre></details><div class="micro">修改后</div><pre>'+escape(s.replacement)+'</pre>').join('')+'<p class="micro">'+escape(r.summary)+'</p><div class="buttons"><button data-decide="dismiss" data-id="'+r.id+'">保留原文</button><button class="primary" data-decide="accept" data-id="'+r.id+'">'+(r.segments?'采用全部修改':'采用建议')+'</button></div>';
+  }
   if(r.error)body+='<p class="error">'+escape(r.error)+'</p>';
   if(r.state==='error')body+='<button data-retry="'+r.id+'">重新尝试</button>';
   return body+'</div>';
  }).join('');
- const ready=requests.find(r=>r.state==='ready');if(ready&&ready.id!==lastReady){lastReady=ready.id;document.querySelector('.inspector').scrollTop=0;}
- const running=requests.some(r=>r.state==='queued'||r.state==='running');
- $('rewrite').disabled=running||(!chosen&&activeBlock<0);$('rewrite').textContent=running?'等待 Agent 返回建议…':'让 Agent 改这一段';
+ const ready=requests.find(r=>r.state==='ready');if(ready&&ready.id!==lastReady)lastReady=ready.id;
+ updateRewriteButton();
  const current=requests.find(r=>r.state==='queued'||r.state==='running')||requests[0];
  $('rewrite-status').hidden=!current||['applied','dismissed'].includes(current.state);
  if(current){
@@ -143,7 +194,7 @@ function elapsed(since) {
  return seconds<60?seconds+' 秒':Math.floor(seconds/60)+' 分 '+seconds%60+' 秒';
 }
 function rewriteStatus(r) {
- const titles={queued:'已排队，等待 Agent',running:'Agent 正在修改这一段',ready:'修改建议已就绪',applied:'已采用到草稿',dismissed:'已保留原文',error:'这次修改未完成'};
+ const titles={queued:'已排队，等待 Agent',running:'Agent 正在修改所选内容',ready:'修改建议已就绪',applied:'已采用到草稿',dismissed:'已保留原文',error:'这次修改未完成'};
  let title=titles[r.state]||r.state,detail=r.notice||'';
  if(r.state==='running')detail=(r.stage||'正在修改文字')+' · 已运行 '+elapsed(r.started_at||r.created_at)+(r.attempt>1?' · 第 '+r.attempt+' 次尝试':'');
  if(r.state==='queued') {
@@ -161,6 +212,7 @@ async function loadTask(id) {
  if(taskID&&dirty)await save();
  const result=await api('/api/task/'+id);taskID=id;view=result;markdown=result.draft.markdown;dirty=false;conflict=false;activeBlock=-1;chosen=null;submitID='';rewriteID='';
  $('markdown').value=markdown;$('block-tools').hidden=true;$('quote-wrap').hidden=true;$('rewrite').disabled=true;
+ multiple=false;resetSelection();
  $('save-state').textContent='已保存到本机';$('task-select').value=id;
  const params=new URLSearchParams(location.hash.slice(1));params.set('task',id);history.replaceState(null,'','#'+params.toString());
  updateStatus();await render();
@@ -168,24 +220,30 @@ async function loadTask(id) {
 function setMode(next) {
  mode=next;document.querySelectorAll('[data-mode]').forEach(el=>el.setAttribute('aria-selected',String(el.dataset.mode===mode)));
  $('paper').hidden=mode!=='paper';$('markdown-pane').hidden=mode!=='markdown';$('diff-pane').hidden=mode!=='diff';
+ $('selection-toolbar').hidden=mode!=='paper';
  $('view-hint').textContent=mode==='paper'?'点击一段文字即可修改':mode==='markdown'?'支持精确选中文字调用 Agent':'红色为原文 · 绿色为修改';
  if(mode==='markdown')$('markdown').value=markdown;if(mode==='diff')renderDiff();
+ updateRewriteButton();
 }
 async function poll() {
  if(!taskID||pollBusy||savePromise)return;pollBusy=true;const polledTask=taskID;
  try{
   const result=await api(endpoint());if(polledTask!==taskID)return;
-  if(result.draft.version!==view.draft.version&&!dirty){view=result;markdown=result.draft.markdown;activeBlock=-1;chosen=null;$('block-tools').hidden=true;$('markdown').value=markdown;await render();}
+  if(result.draft.version!==view.draft.version&&!dirty){view=result;markdown=result.draft.markdown;resetSelection();$('markdown').value=markdown;await render();}
   else {view.task=result.task;view.requests=result.requests;view.writer=result.writer;view.reviewer=result.reviewer;view.artifacts=result.artifacts;}
   updateStatus();
   if(pollError&&$('error').textContent===pollError)error('');pollError='';
  }catch(e){pollError=e.message;error(e.message);}finally{pollBusy=false;}
 }
-$('paper').addEventListener('click',e=>{if(e.target.closest('a'))return;const el=e.target.closest('[data-block]');if(el)showBlock(Number(el.dataset.block));});
-$('paper').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-block]'))showBlock(Number(e.target.dataset.block));});
+$('paper').addEventListener('click',e=>{if(e.target.closest('a')&&!multiple)return;if(capturePaperSelection())return;const el=e.target.closest('[data-block]');if(!el)return;if(multiple||e.shiftKey||e.ctrlKey||e.metaKey){e.preventDefault();toggleBlock(Number(el.dataset.block),e.shiftKey);}else showBlock(Number(el.dataset.block));});
+$('paper').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-block]')){e.preventDefault();if(multiple||e.shiftKey||e.ctrlKey||e.metaKey)toggleBlock(Number(e.target.dataset.block),e.shiftKey);else showBlock(Number(e.target.dataset.block));}});
+$('multi-select').onclick=()=>{multiple=!multiple;selectedBlocks.clear();if(multiple&&activeBlock>=0)selectedBlocks.add(activeBlock);showMultipleSelection();};
+$('selection-clear').onclick=()=>{selectedBlocks.clear();selectionAnchor=-1;showMultipleSelection();};
+$('selection-discuss').onclick=()=>{$('instruction').scrollIntoView({behavior:'smooth',block:'center'});$('instruction').focus({preventScroll:true});};
+$('selected-blocks').onclick=e=>{const button=e.target.closest('[data-unselect]');if(button){selectedBlocks.delete(Number(button.dataset.unselect));showMultipleSelection();}};
 $('outline').addEventListener('click',e=>{const el=e.target.closest('[data-jump]');if(el){setMode('paper');document.querySelector('[data-block="'+el.dataset.jump+'"]').scrollIntoView({behavior:'smooth',block:'center'});}});
 $('block-text').addEventListener('input',updateBlock);
-$('markdown').addEventListener('input',e=>{activeBlock=-1;chosen=null;changed(e.target.value);});
+$('markdown').addEventListener('input',e=>{resetSelection();changed(e.target.value);});
 $('select-source').onclick=()=>{try{captureSelection();$('rewrite').disabled=false;$('instruction').focus();}catch(e){error(e.message);}};
 document.querySelectorAll('[data-mode]').forEach(el=>el.onclick=()=>setMode(el.dataset.mode));
 document.querySelectorAll('[data-prompt]').forEach(el=>el.onclick=()=>{$('instruction').value=el.dataset.prompt;});
@@ -199,7 +257,7 @@ $('rewrite').onclick=async()=>{
 $('suggestions').onclick=async e=>{
  const retry=e.target.closest('[data-retry]');if(retry){retry.disabled=true;await retryRewrite(retry.dataset.retry);retry.disabled=false;return;}
  const b=e.target.closest('[data-decide]');if(!b)return;
- try{await save();b.disabled=true;const result=await api(endpoint('decide'),{id:b.dataset.id,action:b.dataset.decide});view=result;markdown=result.draft.markdown;activeBlock=-1;chosen=null;$('block-tools').hidden=true;$('markdown').value=markdown;await render();updateStatus();toast(b.dataset.decide==='accept'?'已采用建议并保存草稿':'已保留原文');}catch(err){error(err.message);b.disabled=false;}
+ try{await save();b.disabled=true;const result=await api(endpoint('decide'),{id:b.dataset.id,action:b.dataset.decide});view=result;markdown=result.draft.markdown;resetSelection();$('markdown').value=markdown;await render();updateStatus();toast(b.dataset.decide==='accept'?'已采用建议并保存草稿':'已保留原文');}catch(err){error(err.message);b.disabled=false;}
 };
 $('retry-rewrite').onclick=async()=>{const b=$('retry-rewrite');b.disabled=true;await retryRewrite(b.dataset.id);b.disabled=false;};
 $('rewrite-jump').onclick=()=>{
