@@ -65,6 +65,12 @@ func Main(args []string) (code int) {
 		a.configure(args[1:])
 	case "status":
 		a.status()
+	case "web":
+		f := flag.NewFlagSet("web", flag.ContinueOnError)
+		noOpen := f.Bool("no-open", false, "只输出工作台地址")
+		check(f.Parse(args[1:]))
+		ensure(f.NArg() == 0, "用法：avatarthu web [--no-open]")
+		a.openLocalWeb("", *noOpen, true)
 	case "edit":
 		f := flag.NewFlagSet("edit", flag.ContinueOnError)
 		noOpen := f.Bool("no-open", false, "只输出编辑页地址")
@@ -294,6 +300,9 @@ func (a *App) status() {
 	if phase := str(h, "phase"); phase != "" {
 		fmt.Println("当前阶段：" + phase + "；阶段截止：" + str(h, "deadline_at"))
 	}
+	if editor := readMap(a.data("editor-server.json")); str(editor, "state") == "unavailable" {
+		fmt.Println("报告编辑页：" + str(editor, "error"))
+	}
 	k := readMap(filepath.Join(filepath.Dir(a.session()), "keepalive-status.json"))
 	fmt.Printf("网络学堂：%s · %s\n保活：每 10 分钟；最近检查 %s，最近成功 %s\n", strDefault(k, "state", "尚未检查"), str(k, "message"), str(k, "checked_at"), str(k, "last_success"))
 	fmt.Printf("课程扫描：每 %g 小时；下次 %s\n", float64(number(a.config(), "poll_interval_seconds", 43200))/3600, a.nextScan(readMap(a.data("schedule.json"))).In(beijing).Format(time.RFC3339))
@@ -347,6 +356,7 @@ avatarthu service start|stop|status         管理后台进程
 avatarthu menubar start|stop|status         macOS 原生菜单栏监控
 avatarthu run [--sync-only] [--task ID]     立即扫描或处理
 avatarthu revise ID --feedback "修改意见"  本地提出修改
+avatarthu web [--no-open]                  打开课程、文件和产物工作台
 avatarthu edit [--no-open] [ID]            编辑报告、局部调用 Agent、提交定稿
 avatarthu keepalive status|run              查看或立即保活
 avatarthu notifications on|off              可选飞书推送

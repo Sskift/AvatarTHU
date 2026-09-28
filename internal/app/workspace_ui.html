@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>AvatarTHU · 工作台</title><link rel="stylesheet" href="/workspace.css"><script src="/workspace.js" defer></script></head>
+<body>
+<aside class="sidebar">
+ <a class="brand" href="#view=overview"><span class="seal">A</span><span>AvatarTHU<small>你的课程工作台</small></span></a>
+ <nav aria-label="主导航"><a href="#view=overview" data-nav="overview"><span>◫</span>总览</a><a href="#view=courses" data-nav="courses"><span>▦</span>课程</a><a href="#view=files" data-nav="files"><span>▤</span>文件</a><a href="#view=artifacts" data-nav="artifacts"><span>◇</span>产物</a><a href="#view=settings" data-nav="settings"><span>⚙</span>设置与状态</a></nav>
+ <div class="sidebar-foot"><span class="dot" id="connection-dot"></span><span id="connection">正在连接本机后台</span><small>资料保存在本机 · ~/.avatarthu</small></div>
+</aside>
+<div class="shell">
+ <header class="topbar"><div><span class="eyebrow" id="eyebrow">AVATARTHU / WORKSPACE</span><h1 id="title">总览</h1></div><div class="top-actions"><button id="refresh">刷新</button><button class="primary" id="scan">立即扫描</button></div></header>
+ <div id="error" class="error" role="alert" hidden></div>
+ <main id="content" aria-live="polite"><div class="empty">正在载入课程与作业…</div></main>
+ <footer id="footer">本地工作台</footer>
+</div>
+<div id="toast" role="status" hidden></div>
+<dialog id="preview"><header><div><span class="eyebrow">文件预览</span><h2 id="preview-title"></h2><small id="preview-meta"></small></div><button data-close="preview" aria-label="关闭预览">×</button></header><div id="preview-body"></div><footer><a id="preview-download" class="button primary" download>下载文件</a><button data-close="preview">关闭</button></footer></dialog>
+<dialog id="file-dialog"><form id="file-form"><h2 id="file-dialog-title"></h2><p id="file-dialog-description"></p><label id="rename-label">文件名<input id="rename-input" maxlength="120" autocomplete="off"></label><p id="file-error" class="error" hidden></p><div class="dialog-actions"><button type="button" data-close="file-dialog">取消</button><button class="primary" id="file-confirm">确认</button></div></form></dialog>
+<input id="upload-input" type="file" multiple hidden>
+</body></html>

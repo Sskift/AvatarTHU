@@ -513,6 +513,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         row("下次扫描 · \(snapshot.running ? next : "恢复后台后检查")")
         menu.addItem(.separator())
         row("作业 · \(snapshot.busy) 处理中 / \(snapshot.queued) 排队 / \(snapshot.awaiting) 待审阅 / \(snapshot.attention) 需处理")
+        row("打开工作台…", action: #selector(openWorkspace), symbol: "rectangle.3.group")
         row("编辑报告…", action: #selector(openEditor), symbol: "square.and.pencil")
         if !snapshot.reviews.isEmpty {
             let reviews = NSMenu()
@@ -592,6 +593,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func showStatus() { execute(["status"], title: "AvatarTHU 详细状态") }
     @objc func openEditor() { execute(["edit"], title: "报告编辑页") }
+    @objc func openWorkspace() { execute(["web"], title: "AvatarTHU 工作台") }
     @objc func keepalive() { execute(["keepalive", "run"], title: "网络学堂保活") }
     @objc func login() { execute(["login", "thu"], title: "登录网络学堂", openingText: "请在打开的浏览器中完成本人认证。登录窗口完成后会自动更新状态。") }
     @objc func toggleService() { execute(["service", snapshot.running ? "stop" : "start"], title: snapshot.running ? "停止后台" : "启动后台") }

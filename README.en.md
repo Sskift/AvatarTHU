@@ -306,10 +306,24 @@ Feishu login reuses a valid local Lark CLI session. If none is configured, it gu
 7. From revision 2 onward, a **Changes in this revision** section appears near the beginning: responses to feedback, unresolved items, links to the previous review and deliverables, and actual file changes. Text, code, and ZIP members support line comparisons; PDF and Office files remain available side by side. Responses are labeled as writer notes and are not passed to the independent reviewer. Missing or changed historical files are reported instead of inventing differences.
 
 Local-only mode creates an HTML review page with the same sections. Run `avatarthu status` to find its path, and submit manually through the school website. Enabling Feishu later can publish an existing revision as a document and card without redoing the assignment.
+## Web workspace
+
+Run `avatarthu web`, or choose **打开工作台…** from the macOS menu bar. The UI is embedded in the native Go binary and shares the existing course polling and keepalive process. No frontend runtime or extra server is required.
+
+1. **Overview:** Courses, work awaiting your review, processing progress, and connection status for Learn, Feishu, Claude, and Codex.
+2. **Courses:** Browse by semester and course, with separate views for assignments, materials, announcements, and outputs. Upload supplementary materials to the course's `courseware/user/` folder; subsequent scans detect material changes.
+3. **Files:** Search names and paths across courses, filter by course or type, preview PDFs, images, text, HTML, and ZIP contents, and download files. Rename or remove your uploaded materials; removed files remain recoverable in `data/workspace-trash/`.
+4. **Deliverables:** Browse current and historical artifacts alongside every independent review. Open the report editor for direct edits, multi-paragraph feedback, and final-manuscript handoff to update related artifacts. School submission still requires confirmation on the current Feishu card.
+5. **Settings and status:** Select writer and reviewer independently, adjust course polling, or queue an immediate scan. Existing work retains its execution plan, and keepalive stays at 10-minute intervals.
+
+The workspace and report editor share a persistent local address. Get the complete bookmark with `avatarthu web --no-open`; daemon restarts keep it valid, including old report bookmarks. It listens only on `127.0.0.1`, so the link is for this computer; Feishu remains the cross-device entry point. Start the daemon first with `avatarthu service start`.
+
 
 ## Edit a report and hand off the final manuscript
 
 Run `avatarthu edit` (or `avatarthu edit TASK_ID`), or choose **编辑报告…** in the macOS menu bar. The local browser editor is served by the existing Go daemon, without another runtime or resident process. Start the daemon first with `avatarthu service start`. After upgrading an already-running daemon, stop and start it once to load the editor.
+
+The editor keeps the same local port and access token after its first launch, including daemon restarts, upgrades, and computer reboots. Bookmark the complete link. Open pages reconnect when the daemon returns. If another program occupies the port, the editor reports the conflict and retries without changing the address; course polling and keepalive continue.
 
 1. **Edit directly.** Click a paragraph in the HTML preview and edit its text in the side panel. Changes save automatically. The Markdown tab supports precise source edits, and Changes shows the original alongside your draft. Download the Markdown alone or with its screenshots.
 2. **Ask for a scoped rewrite.** Select one paragraph or choose **多段选择** to pick several, including nonadjacent paragraphs. Shift selects a range; ⌘ / Ctrl toggles paragraphs; dragging across text selects the touched paragraphs. The side panel lists the full selection. One instruction sends them together to the configured writer in a fresh CLI session with its default model. Adjacent paragraphs can be rewritten together; separate passages receive separate before/after suggestions, preserving unselected content. For precise selections, use the paragraph field or Markdown tab. Choose **采用全部修改** to apply all proposed replacements or keep the original. If a selected passage has changed meanwhile, the editor preserves your draft and asks you to select again.
@@ -383,6 +397,7 @@ avatarthu run                     # Scan and process now
 avatarthu run --sync-only         # Only sync, download, and deliver announcements
 avatarthu run --task TASK_ID      # Sync, then process only the specified assignment
 avatarthu keepalive run           # Keep alive now and attempt session recovery
+avatarthu web                     # Open the course, file, and deliverable workspace
 avatarthu edit                    # Edit reports and hand off a final manuscript
 avatarthu status                  # Services, authentication, tasks, and review links
 avatarthu service stop            # Stop the background service; preserve data

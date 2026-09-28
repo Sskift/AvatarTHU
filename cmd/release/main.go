@@ -59,6 +59,20 @@ func main() {
 	}))
 	copyFile("THIRD_PARTY.md", filepath.Join(stage, "THIRD_PARTY.md"))
 	copyFile("third_party/AutoThu-LICENSE", filepath.Join(stage, "licenses", "AutoThu-LICENSE"))
+	copyFile("third_party/PDF.js-LICENSE", filepath.Join(stage, "licenses", "PDF.js-LICENSE"))
+	must(filepath.WalkDir("internal/app/pdfjs", func(p string, d os.DirEntry, e error) error {
+		if e != nil {
+			return e
+		}
+		if !d.IsDir() && strings.HasPrefix(d.Name(), "LICENSE") {
+			relative, e := filepath.Rel("internal/app/pdfjs", p)
+			if e != nil {
+				return e
+			}
+			copyFile(p, filepath.Join(stage, "licenses", "pdfjs", relative))
+		}
+		return nil
+	}))
 	copyFile(filepath.Join(runtime.GOROOT(), "LICENSE"), filepath.Join(stage, "licenses", "Go-LICENSE"))
 	mods, err := exec.Command("go", "list", "-m", "-json", "all").Output()
 	must(err)

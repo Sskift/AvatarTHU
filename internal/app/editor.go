@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,7 +28,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-//go:embed editor_ui.html editor_ui.css editor_ui.js
+//go:embed editor_ui.html editor_ui.css editor_ui.js workspace_ui.html workspace_ui.css workspace_ui.js pdfjs
 var editorUI embed.FS
 
 var editorRequestID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -443,7 +442,7 @@ func (a *App) editorHandler(token, host string) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self' blob:; worker-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 		if r.Host != host {
 			http.Error(w, "无效地址", http.StatusForbidden)
 			return
@@ -457,11 +456,30 @@ func (a *App) editorHandler(token, host string) http.Handler {
 				http.Error(w, "请通过 avatarthu edit 重新打开", 401)
 				return
 			}
-			http.SetCookie(w, &http.Cookie{Name: editorCookieName(host), Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+			http.SetCookie(w, &http.Cookie{Name: editorCookieName(host), Value: token, Path: "/", MaxAge: 30 * 24 * 60 * 60, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 			w.WriteHeader(204)
 			return
 		}
-		static := map[string]string{"/": "editor_ui.html", "/editor.css": "editor_ui.css", "/editor.js": "editor_ui.js"}
+		if strings.HasPrefix(r.URL.Path, "/pdfjs/") && r.Method == "GET" {
+			b, e := editorUI.ReadFile(strings.TrimPrefix(r.URL.Path, "/"))
+			if e != nil {
+				http.NotFound(w, r)
+				return
+			}
+			contentType := "application/octet-stream"
+			switch filepath.Ext(r.URL.Path) {
+			case ".mjs", ".js":
+				contentType = "text/javascript; charset=utf-8"
+			case ".wasm":
+				contentType = "application/wasm"
+			case ".ttf":
+				contentType = "font/ttf"
+			}
+			w.Header().Set("Content-Type", contentType)
+			_, _ = w.Write(b)
+			return
+		}
+		static := map[string]string{"/": "workspace_ui.html", "/workspace.css": "workspace_ui.css", "/workspace.js": "workspace_ui.js", "/editor": "editor_ui.html", "/editor.css": "editor_ui.css", "/editor.js": "editor_ui.js"}
 		if file, ok := static[r.URL.Path]; ok && r.Method == "GET" {
 			b, _ := editorUI.ReadFile(file)
 			w.Header().Set("Content-Type", map[string]string{".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}[filepath.Ext(file)])
@@ -471,6 +489,9 @@ func (a *App) editorHandler(token, host string) http.Handler {
 		c, e := r.Cookie(editorCookieName(host))
 		if e != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(token)) != 1 {
 			http.Error(w, "请从菜单栏或 avatarthu edit 重新打开编辑页", 401)
+			return
+		}
+		if a.workspaceAPI(w, r) {
 			return
 		}
 		var result any
@@ -555,7 +576,7 @@ func (a *App) editorHandler(token, host string) http.Handler {
 				if r.URL.Query().Get("download") == "1" {
 					w.Header().Set("Content-Disposition", `attachment; filename="report.html"`)
 				} else {
-					body = strings.Replace(body, `<nav aria-label="报告目录">`, `<nav aria-label="报告目录"><a href="/#task=`+tid+`">← 返回编辑报告</a>`, 1)
+					body = strings.Replace(body, `<nav aria-label="报告目录">`, `<nav aria-label="报告目录"><a href="/editor#task=`+tid+`">← 返回编辑报告</a>`, 1)
 				}
 				_, _ = io.WriteString(w, body)
 				return
@@ -600,34 +621,23 @@ func (a *App) editorHandler(token, host string) http.Handler {
 	})
 }
 func stampSafe() string { return time.Now().UTC().Format("20060102T150405") }
-func (a *App) startEditor(ctx context.Context) func() {
-	listener, e := net.Listen("tcp4", "127.0.0.1:0")
-	check(e)
-	token := randomID(32)
-	host := listener.Addr().String()
-	server := &http.Server{Handler: a.editorHandler(token, host), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
-	writeJSON(a.data("editor-server.json"), M{"url": "http://" + host + "/#token=" + token, "pid": os.Getpid(), "state": "running"})
-	go func() {
-		if e := server.Serve(listener); e != nil && e != http.ErrServerClosed {
-			fmt.Fprintln(os.Stderr, "报告编辑页：", safeError(e))
-		}
-	}()
-	return func() {
-		timeout, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		defer cancel()
-		_ = server.Shutdown(timeout)
-		writeJSON(a.data("editor-server.json"), M{"state": "stopped"})
-	}
-}
 func (a *App) openEditor(tid string, noOpen bool) {
+	a.openLocalWeb(tid, noOpen, false)
+}
+func (a *App) openLocalWeb(tid string, noOpen, workspace bool) {
 	if tid != "" {
 		ensure(len(readMap(a.taskPath(tid))) > 0, "找不到这份作业")
 	}
 	m := readMap(a.data("editor-server.json"))
 	raw := str(m, "url")
-	ensure(str(m, "state") == "running" && strings.HasPrefix(raw, "http://127.0.0.1:"), "编辑页尚未启动。请运行 avatarthu service start；升级后请重启后台。")
+	ensure(str(m, "state") != "unavailable", str(m, "error"))
+	ensure(str(m, "state") == "running" && strings.HasPrefix(raw, "http://127.0.0.1:"), "编辑页尚未启动。请运行 avatarthu service start；原来的书签地址会继续生效。")
 	u, e := url.Parse(raw)
 	check(e)
+	if !workspace {
+		u.Path = "/editor"
+		raw = u.String()
+	}
 	client := http.Client{Timeout: 2 * time.Second}
 	resp, e := client.Get("http://" + u.Host + "/")
 	ensure(e == nil, "后台暂时不可用，请运行 avatarthu service start")
@@ -649,5 +659,9 @@ func (a *App) openEditor(tid string, noOpen bool) {
 		cmd = exec.Command("xdg-open", raw)
 	}
 	check(cmd.Run())
-	fmt.Println("已打开本地报告编辑页。")
+	if workspace {
+		fmt.Println("已打开 AvatarTHU 工作台。")
+	} else {
+		fmt.Println("已打开本地报告编辑页。")
+	}
 }

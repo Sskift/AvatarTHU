@@ -100,8 +100,21 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 	}
 	success := true
 	schedule := readMap(a.data("schedule.json"))
-	if !tick || !time.Now().Before(a.nextScan(schedule)) {
+	manualScan := readMap(a.data("workspace-scan.json"))
+	requested := str(manualScan, "state") == "queued" || str(manualScan, "state") == "running"
+	if !tick || requested || !time.Now().Before(a.nextScan(schedule)) {
+		if requested {
+			manualScan["state"] = "running"
+			writeJSON(a.data("workspace-scan.json"), manualScan)
+		}
 		e := attempt(func() { defer a.stage("课程同步", 30*time.Minute)(); a.syncCourses() })
+		if requested {
+			merge(manualScan, M{"state": "completed", "completed_at": stamp()})
+			if e != nil {
+				merge(manualScan, M{"state": "error", "error": safeError(e)})
+			}
+			writeJSON(a.data("workspace-scan.json"), manualScan)
+		}
 		if e == nil {
 			writeJSON(a.data("schedule.json"), M{"last_sync_at": stamp()})
 		} else {

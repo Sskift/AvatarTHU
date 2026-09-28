@@ -18,3 +18,9 @@ AvatarTHU is an independent Go implementation. It does not invoke or bundle a Py
 Pinned Go module versions are recorded in `go.mod` and `go.sum`. Release archives include the upstream dependency license files under `licenses/`.
 
 Course materials, student data, sessions, credentials, and generated assignments are never part of the source repository or releases.
+
+## PDF.js
+
+The local Web workspace uses Mozilla PDF.js 6.3.289 (Apache-2.0) for on-demand, single-page PDF previews. Vendored assets in `internal/app/pdfjs/` come from the `pdfjs-dist@6.3.289` npm package: https://github.com/mozilla/pdf.js/releases/tag/v6.3.289. The archive SHA-512 integrity is `ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==`. The browser reads only local assets; users do not install Node.js or an additional PDF runtime.
+
+The upstream license is retained in `third_party/PDF.js-LICENSE`; font, CMap, and image decoder licenses remain beside their vendored assets. Release archives include these licenses.

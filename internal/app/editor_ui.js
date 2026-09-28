@@ -17,7 +17,7 @@ async function api(path, body) {
   const text=await response.text(); let data; try{data=JSON.parse(text);}catch{data={error:text};}
   if(!response.ok) throw new Error(data.error || '后台暂时不可用'); return data;
  } catch(e) {
-  if(e.name==='AbortError'||e instanceof TypeError)throw new Error('暂时连不上后台，正在尝试重新连接。文字仍保留在页面中；如果刚重启后台，请从菜单栏重新打开编辑页。');
+  if(e.name==='AbortError'||e instanceof TypeError)throw new Error('暂时连不上后台，正在尝试重新连接。后台恢复后此页会重新连接；尚未保存的文字仍保留在页面中。');
   throw e;
  } finally {clearTimeout(timer);}
 }

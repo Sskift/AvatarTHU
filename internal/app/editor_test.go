@@ -390,7 +390,7 @@ func TestEditorLivesWithDaemonWithoutFeishu(t *testing.T) {
 	}
 	u, e := url.Parse(str(state, "url"))
 	check(e)
-	response, e := http.Get("http://" + u.Host + "/")
+	response, e := http.Get("http://" + u.Host + "/editor")
 	check(e)
 	body, e := io.ReadAll(response.Body)
 	response.Body.Close()
