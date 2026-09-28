@@ -283,6 +283,8 @@ If a review rejects the work, its specific comments go back to the writer for a 
 
 Review distinguishes defects in the deliverables from execution-environment limits. A sandbox that cannot open a graphical window is recorded as a limitation, not evidence that the program is broken. Review combines source inspection, independent calculations, and actual runtime screenshots; missing evidence for essential behavior can still prevent approval.
 
+Writer and reviewer processes set `AVATARTHU_HEADLESS=1`. Background checks exercise algorithms and command-line paths without creating Tkinter or Cocoa windows. GUI event checks replace Tkinter modules before import and use stateful fake widgets; they do not count as real-window verification. Assignments should separate `--test` from GUI startup and refuse GUI startup under this environment variable. Existing genuine screenshots may be reused, with missing visual checks recorded honestly.
+
 Cross-review can catch omissions and mistakes, but it does not guarantee mathematical, experimental, or program correctness. You remain responsible for the final review and submission decision.
 
 ## Feishu and review
@@ -304,6 +306,19 @@ Feishu login reuses a valid local Lark CLI session. If none is configured, it gu
 7. From revision 2 onward, a **Changes in this revision** section appears near the beginning: responses to feedback, unresolved items, links to the previous review and deliverables, and actual file changes. Text, code, and ZIP members support line comparisons; PDF and Office files remain available side by side. Responses are labeled as writer notes and are not passed to the independent reviewer. Missing or changed historical files are reported instead of inventing differences.
 
 Local-only mode creates an HTML review page with the same sections. Run `avatarthu status` to find its path, and submit manually through the school website. Enabling Feishu later can publish an existing revision as a document and card without redoing the assignment.
+
+## Edit a report and hand off the final manuscript
+
+Run `avatarthu edit` (or `avatarthu edit TASK_ID`), or choose **编辑报告…** in the macOS menu bar. The local browser editor is served by the existing Go daemon, without another runtime or resident process. Start the daemon first with `avatarthu service start`. After upgrading an already-running daemon, stop and start it once to load the editor.
+
+1. **Edit directly.** Click a paragraph in the HTML preview and edit its text in the side panel. Changes save automatically. The Markdown tab supports precise source edits, and Changes shows the original alongside your draft. Download the Markdown alone or with its screenshots.
+2. **Ask for a scoped rewrite.** Select a paragraph, or a smaller passage inside its text field, and give an instruction. The configured writer runs in a fresh CLI session with its default model and returns a proposed replacement. Choose Accept or Keep original; requesting a suggestion never applies it automatically.
+3. **Submit the final manuscript.** “提交成品” hands a snapshot of your draft and images to the writer. It preserves your wording while updating the PDF, HTML, report source bundle, report inside code archives, and other affected files. The normal independent review follows, with failed reviews returning to the writer. Progress appears on the page and the existing Feishu document is updated.
+4. **Review the new version.** When processing finishes, load the new manuscript and inspect the updated artifacts. Loading a new version backs up the old draft; edits made after handoff stay separate from the submitted snapshot. School submission still requires your decision on the latest Feishu card.
+
+Drafts, images, request receipts, and backups live in the assignment's `editor/` directory. Previously frozen deliverables and card receipts stay intact. Requests are serialized with the existing writer/reviewer worker. A queued request survives a restart; an interrupted scoped rewrite is reported and can be requested again. Conflicting saves from another tab are rejected without overwriting that tab's text; download your unsaved text before refreshing.
+
+New reports include `report.md` and `report-source.zip` (Markdown plus relative image paths), so editable sources are published with each revision in the same review document. For older reports that have no source, paste Markdown into the editor. The editor listens only on the local computer; Feishu remains the remote review and notification entry point.
 
 ## Execution errors and recovery
 
@@ -349,6 +364,7 @@ The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windo
 │           ├── source/           # Requirements and original attachments
 │           ├── runs/r1/round-1/  # Separate writer and reviewer directories
 │           ├── outputs/r1/       # Frozen submission and deliverable files
+│           ├── editor/           # Draft, images, scoped requests, manuscript handoffs
 │           ├── reviews/r1/       # Local review, cloud drafts, and receipts
 │           └── state.json
 ├── data/                         # Task index, schedule, delivery receipts
@@ -365,6 +381,7 @@ avatarthu run                     # Scan and process now
 avatarthu run --sync-only         # Only sync, download, and deliver announcements
 avatarthu run --task TASK_ID      # Sync, then process only the specified assignment
 avatarthu keepalive run           # Keep alive now and attempt session recovery
+avatarthu edit                    # Edit reports and hand off a final manuscript
 avatarthu status                  # Services, authentication, tasks, and review links
 avatarthu service stop            # Stop the background service; preserve data
 avatarthu menubar status          # macOS menu bar status

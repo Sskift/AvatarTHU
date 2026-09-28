@@ -105,6 +105,11 @@ func (a *App) prepare(st M, job string) {
 		copyFile(filepath.Join(str(st, "folder"), "answer.md"), filepath.Join(job, "previous-draft", "answer.md"))
 	}
 	writeJSON(filepath.Join(job, "output-schema.json"), writerSchema)
+	if handoff := obj(st, "editor_submission"); number(handoff, "revision", -1) == number(st, "revision", 0) {
+		id := str(handoff, "id")
+		ensure(editorRequestID.MatchString(id), "无效编辑定稿编号")
+		copyTree(filepath.Join(a.editorDir(st), "requests", id, "manuscript"), filepath.Join(job, "owner-final"))
+	}
 }
 func validateWriter(r M, job string) M {
 	_, ok := r["ready"].(bool)

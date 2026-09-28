@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -405,6 +406,26 @@ func (s *School) download(raw, target, version string) {
 	if exists(target) && str(old, "version") == version && str(old, "sha256") == digest(target) {
 		return
 	}
+	for retry := 0; ; retry++ {
+		err := attempt(func() { s.downloadFile(raw, target, version, receipt) })
+		if err == nil {
+			return
+		}
+		var network net.Error
+		transient := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &network)
+		if retry >= 2 || !transient || s.app.Ctx.Err() != nil {
+			panic(err)
+		}
+		fmt.Fprintln(os.Stderr, stamp(), "课件或附件下载中断，重试", retry+1, "：", safeError(err))
+		select {
+		case <-s.app.Ctx.Done():
+			panic(s.app.Ctx.Err())
+		case <-time.After(time.Duration(retry+1) * time.Second):
+		}
+	}
+}
+func (s *School) downloadFile(raw, target, version, receipt string) {
+	started := time.Now()
 	r := s.request("GET", raw, nil, nil, "", true)
 	defer r.Body.Close()
 	ext := strings.ToLower(filepath.Ext(target))
@@ -416,7 +437,12 @@ func (s *School) download(raw, target, version string) {
 	defer os.Remove(f.Name())
 	defer f.Close()
 	n, e := io.Copy(f, r.Body)
-	check(e)
+	if e != nil {
+		panic(fmt.Errorf("下载 %s 中断（已读取 %d / %d 字节，用时 %s）：%w", filepath.Base(target), n, r.ContentLength, time.Since(started).Round(time.Millisecond), e))
+	}
+	if r.ContentLength >= 0 && n != r.ContentLength {
+		panic(fmt.Errorf("附件 %s 下载不完整（已读取 %d / %d 字节）：%w", filepath.Base(target), n, r.ContentLength, io.ErrUnexpectedEOF))
+	}
 	ensure(n > 0 && (r.ContentLength < 0 || r.ContentLength == n), "附件下载不完整，下次重试")
 	check(f.Sync())
 	check(f.Close())

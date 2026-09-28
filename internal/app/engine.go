@@ -64,7 +64,7 @@ func modelEnv() []string {
 			env = append(env, entry)
 		}
 	}
-	return append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1")
+	return append(env, "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1", "AVATARTHU_HEADLESS=1")
 }
 func (a *App) engine(executor, job, prompt string, schema M, role string, plan M) M {
 	defer a.stage(executor+" "+role, time.Duration(number(plan, "stage_timeout", 7200))*time.Second+2*time.Minute)()
@@ -102,7 +102,7 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 	check(e)
 	defer stderr.Close()
 	writeFile(filepath.Join(job, "prompt.txt"), []byte(prompt), 0600)
-	metadata := M{"executor": executor, "role": role, "model_selection": "cli-default", "started_at": stamp(), "fresh_session": true}
+	metadata := M{"executor": executor, "role": role, "model_selection": "cli-default", "started_at": stamp(), "fresh_session": true, "headless": true}
 	cmd := command(ctx, args...)
 	cmd.Dir = job
 	cmd.Env = modelEnv()
@@ -170,7 +170,10 @@ func writerPrompt(st M, job, executor, feedback string) string {
 工作目录：%s。只修改此目录，不访问其他课程、账号凭据、飞书、网络学堂或提交接口。
 input/ 为原题、附件和课件；先读 assignment.md，再看相关原文件与 .txt 提取文本。PDF 图示及扫描页要核对原文件，文本提取不代表已完整读取。
 AvatarTHU 不附带 Python 或文档工具。使用机器现有工具；必要依赖可装在本作业目录内，明确记录安装和复现方式，无法运行的检查如实说明。
+%s
 按原题交付报告、PDF、代码或其他所需文件。代码项目打包为保留目录结构的 ZIP。不能虚构数据、引用、截图或运行结果，不能把模板当成成品。
+有报告时同时交付 final/report.md 和 final/report-source.zip。ZIP 根目录是 report.md，图片按 Markdown 的相对路径放入；PDF、可离线查看的 HTML、代码包中的报告都从同一份 Markdown 正文生成，避免只在生成脚本中硬编码正文。将这些文件列入 files，使编辑源文件跟随每版产物保存到同一个审阅文档。
+如果存在 owner-final/report.md，这是用户在编辑页提交的成品：逐字保留正文措辞与图片引用，以此同步 PDF、HTML、报告源文件和代码包内的报告；按实际影响调整相关说明或代码，不重写无关文件。如果定稿存在事实错误或与原题冲突，在修改说明中具体列出并作必要修正，不悄悄恢复旧版措辞。owner-final/ 只供主写参考，不把用户交互记录或此说明复制进最终报告。
 报告的结构和篇幅以题目要求为准。实验报告用简明、自然的语言讲清程序怎么运行和使用、算法如何实现、具体样例的实际结果，配清晰的真实运行截图；题目另有要求时按题目写。
 运行部分直接给操作步骤和必要命令，不写版本号、开发环境、打包过程或工具清单，命令不带行尾注释。生成的作业代码不写解释性注释或 docstring；保留执行所需的指令及第三方许可证。正文不堆叠括号补充说明，图注只写图的内容。
 不要扩写题目未要求的架构、边界、契约、验收清单、泛泛的摘要和总结，也不要用“高质量、完全正确、完美通过”等自我评价。流程记录、修改说明和主写自查放在 review.md 或 presentation 中，不混入作业报告正文。
@@ -178,18 +181,25 @@ AvatarTHU 不附带 Python 或文档工具。使用机器现有工具；必要�
 所有交付文件写入 final/。另外写 review.md，记录真实运行命令、结果、限制和未完成项，说明它是主写自查。
 final/ 禁止命名 review.md 或 submission.zip。需要继续上版时读 previous-final/。必须逐条响应用户和上一轮复审意见，记录“意见—修改位置—验证结果”。
 presentation.revision_notes 逐条填写修改意见的 request、status（addressed/partial/unresolved）、detail（改动位置、验证与未完成原因）、files（本版相关交付文件的相对路径）。没有修改意见时填空数组；不得把未处理意见标为 addressed。这些说明属于主写记录，不是独立复审结论。
-只在产物完整且检查通过时 ready=true；未完成部分写入 blockers。没有可用文件可用 files=[]、ready=false，但仍须 review.md。
+只在产物完整且已有检查足以支持交付时 ready=true；真正未完成的要求写入 blockers。后台不能显示窗口等环境限制单独写入 review.md 和 checks，不单独因此判为未完成；核心行为缺少可核对证据时仍须 ready=false。没有可用文件可用 files=[]、ready=false，但仍须 review.md。
 最终 JSON 包含 ready、summary、blockers、files、presentation。files 是 final/ 内实际交付文件的相对路径。
 presentation.assignment 用简明段落或有序列表概括题意；checks 写实际检查结果；highlights 最多三张真实产物图，每项 title/detail/artifact/member；artifact 必须在 files 内，member 为 ZIP 内图路径（直接图片留空）。没有图则空列表。界面示意图用 mock/gui_interface 名字且明确非真实截图。
 产物在审阅文档的第三部分统一嵌入，历次独立复审放第五部分。不要在消息中另发文件。summary 不作无证据的正确性保证。
 课程：%s；作业：%s；截止：%s。
 用户修改意见：%s
 上一轮独立复审意见：%s
-`, executor, job, str(st, "course"), str(st, "title"), str(st, "deadline"), strDefault(st, "feedback", "无"), feedback)
+`, executor, job, headlessInstructions, str(st, "course"), str(st, "title"), str(st, "deadline"), strDefault(st, "feedback", "无"), feedback)
 }
+
+const headlessInstructions = `当前执行器由后台任务启动，进程环境含 AVATARTHU_HEADLESS=1。验证必须在无界面模式完成：不要启动 GUI 程序、tk.Tk()、mainloop() 或 Cocoa 窗口，也不要用 root.withdraw() 探测窗口是否可用；macOS 可能直接中止进程，try/except 无法捕获。
+算法检查只导入核心计算模块，用明确输入核对输出，例如直接调用 weiler_atherton_clip() 并独立核对面积。命令行 --test 入口必须在导入 GUI/Tkinter 之前分流；手动 GUI 入口遇到 AVATARTHU_HEADLESS=1 时应直接输出说明并正常退出，不尝试创建窗口。
+需要检查界面事件逻辑时，先通过 unittest.mock.patch.dict(sys.modules, ...) 替换 tkinter、tkinter.ttk、tkinter.messagebox 等模块，再导入 GUI；使用带状态的假控件检查数值、撤销及事件逻辑，不能用 MagicMock 的默认返回值冒充实际结果。该检查只证明事件逻辑，不宣称验证了真实窗口或截图。
+后台不要安装或启动虚拟显示，不要反复运行失败的图形入口。真实窗口截图只使用已有且与当前界面一致的运行截图；缺少时如实记录，不能用 Mock 截图代替。环境限制和实际产物缺陷分别记录。`
+
 func reviewerPrompt(job string) string {
 	return `你是独立的作业复审者，工作目录：` + job + `。
 input/ 是原始题目和课件；candidate/ 是当前候选产物。先从题目提炼要求，再独立核对答案、推导、代码、报告和结果。
+` + headlessInstructions + `
 报告按题目要求核对，允许简明表达；不要额外要求架构、契约、验收清单等题面未要求的章节。算法细节、运行说明和样例结果仍须与实际产物相符，不能把示意图当运行截图。
 candidate/ 是程序从主写 final/ 逐文件复制的审阅副本，内部相对路径保持一致；这两个目录前缀的不同不是产物路径错误。
 主写流程的 review.md 自查被刻意隔离，不因其未出现在候选副本中判定漏交。原题要求提交的报告、代码、答案等文件仍须在 candidate/ 中逐项核对。

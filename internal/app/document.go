@@ -382,9 +382,9 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 		}
 	}
 	blocks = append(blocks, "<h2>执行自查记录</h2>", paragraph("由主写会话生成，包含实际命令、结果和限制。"), attach(report, ""), "<h1>四、审阅与操作</h1>")
-	instructions := []string{"对照第一部分的原题与附件，确认完成范围。", "检查关键结果，并打开第三部分的报告、代码和自查记录。", "在相关段落或图片上批注，再回卡片点“按文档批注修改”；也可直接在卡片填写意见。", "确认后在当前版本卡片选择提交。直接编辑云文档不会修改待提交文件。"}
+	instructions := []string{"对照第一部分的原题与附件，确认完成范围。", "检查关键结果，并打开第三部分的报告、代码和自查记录。", "需要直接改报告措辞时，从菜单栏“编辑报告…”或 avatarthu edit 打开本地编辑页，可自己改字、局部调用 Agent，再提交定稿同步产物。也可在云文档批注后从卡片发起修改。", "确认后在当前版本卡片选择提交。直接编辑云文档不会修改待提交文件。"}
 	if local {
-		instructions[2] = "运行 avatarthu revise " + str(st, "task_id") + ` --feedback "修改意见"，下一次调度生成新版。`
+		instructions[2] = "运行 avatarthu edit " + str(st, "task_id") + " 打开报告编辑页；也可以用 revise --feedback 提出修改。"
 		instructions[3] = "本地模式请自行在网络学堂网页提交；启用飞书后可通过本人当前版本卡片决定提交。"
 	}
 	blocks = append(blocks, ordered(instructions), "<h1>五、历次独立复审</h1>", paragraph("主写和复审分别使用新进程与新会话，各用 CLI 默认模型。复审只接收原题和当前候选产物，不传递主写对话、自查或以前的复审结论。历次意见如下；最终提交仍由本人决定。"))

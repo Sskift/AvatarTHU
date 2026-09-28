@@ -26,14 +26,15 @@ var Version = "0.2.0-alpha.8"
 var beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 
 type App struct {
-	Root     string
-	Ctx      context.Context
-	RunModel func(string, string, string, M, string, M) M
-	SendCard func(M, string) M
-	Verify   func(M) *School
-	Upload   func(*School, M, string) M
-	CallLark func([]string) M
-	monitor  *daemonMonitor
+	Root       string
+	Ctx        context.Context
+	RunModel   func(string, string, string, M, string, M) M
+	SendCard   func(M, string) M
+	Verify     func(M) *School
+	Upload     func(*School, M, string) M
+	CallLark   func([]string) M
+	monitor    *daemonMonitor
+	editorWake chan struct{}
 }
 
 func New(ctx context.Context, root string) *App {

@@ -1,9 +1,36 @@
 package app
 
 import (
+	"os"
+	"os/exec"
 	"reflect"
 	"testing"
 )
+
+func TestHarnessChildHeadlessEnvironment(t *testing.T) {
+	if os.Getenv("AVATARTHU_ENV_CHECK") == "1" {
+		if os.Getenv("AVATARTHU_HEADLESS") != "1" {
+			t.Fatal("background harness did not receive headless mode")
+		}
+		if os.Getenv("AVATARTHU_TEST_SECRET") != "" || os.Getenv("LARK_TEST_SECRET") != "" || os.Getenv("CLAUDECODE") != "" {
+			t.Fatal("private parent environment reached the harness")
+		}
+		return
+	}
+	t.Setenv("AVATARTHU_HEADLESS", "0")
+	t.Setenv("AVATARTHU_TEST_SECRET", "private")
+	t.Setenv("LARK_TEST_SECRET", "private")
+	t.Setenv("CLAUDECODE", "1")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestHarnessChildHeadlessEnvironment$")
+	cmd.Env = append(modelEnv(), "AVATARTHU_ENV_CHECK=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("harness environment: %v\n%s", err, output)
+	}
+}
 
 func TestConfigureHarnessesPreservesLegacyAndOtherRole(t *testing.T) {
 	a := testApp(t)

@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -17,6 +20,18 @@ func (a *App) nextScan(schedule M) time.Time {
 		return time.Now()
 	}
 	return last.Add(time.Duration(number(a.config(), "poll_interval_seconds", 43200)) * time.Second)
+}
+func syncFailureMessage(err error) string {
+	var expired sessionExpired
+	if errors.As(err, &expired) {
+		return "网络学堂需要重新认证\n" + cut(safeError(err), 1200) + "\n请运行 avatarthu login thu；已缓存的作业继续处理。"
+	}
+	title := "网络学堂同步未完成"
+	var network net.Error
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &network) {
+		title = "网络学堂同步中断：网络或数据读取异常"
+	}
+	return title + "\n" + cut(safeError(err), 1200) + "\n15 分钟后自动重试；保留现有登录凭证，已缓存的作业继续处理。"
 }
 func (a *App) syncCourses() {
 	s := a.school(true)
@@ -80,6 +95,9 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 	wg.Add(1)
 	go func() { defer wg.Done(); a.maintenanceLoop(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
+	if !syncOnly {
+		a.processEditorRequests(selected)
+	}
 	success := true
 	schedule := readMap(a.data("schedule.json"))
 	if !tick || !time.Now().Before(a.nextScan(schedule)) {
@@ -90,9 +108,9 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 			success = false
 			schedule["next_sync_retry_at"] = time.Now().Add(15 * time.Minute).Format(time.RFC3339)
 			writeJSON(a.data("schedule.json"), schedule)
-			fmt.Fprintln(os.Stderr, "网络学堂同步失败："+safeError(e))
+			fmt.Fprintln(os.Stderr, stamp(), "网络学堂同步失败："+safeError(e))
 			_ = attempt(func() {
-				a.notifyOnce("sync-error:"+time.Now().In(beijing).Format("2006-01-02")+":"+fingerprint(e.Error()), "网络学堂同步失败："+cut(safeError(e), 1200)+"\n登录过期时运行 avatarthu login thu；已缓存的作业继续处理。")
+				a.notifyOnce("sync-error:"+time.Now().In(beijing).Format("2006-01-02")+":"+fingerprint(e.Error()), syncFailureMessage(e))
 			})
 		}
 	}
@@ -232,6 +250,8 @@ func (a *App) daemon() {
 	defer a.lock("daemon", false)()
 	ctx, cancel := context.WithCancel(a.Ctx)
 	defer cancel()
+	a.editorWake = make(chan struct{}, 1)
+	defer a.startEditor(ctx)()
 	var workers sync.WaitGroup
 	a.monitor = &daemonMonitor{app: a, phase: "等待调度", started: time.Now(), deadline: time.Now().Add(3 * time.Minute)}
 	a.monitor.beat()
@@ -252,6 +272,7 @@ func (a *App) daemon() {
 		case <-ctx.Done():
 			return
 		case <-time.After(time.Minute):
+		case <-a.editorWake:
 		}
 	}
 }

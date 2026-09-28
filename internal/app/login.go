@@ -250,6 +250,7 @@ func (a *App) keepalive(force, recoverLogin bool) M {
 	}
 	state["recovered"] = recovered
 	if err == nil {
+		delete(state, "recovery_errors")
 		merge(state, M{"state": "valid", "last_success": stamp(), "message": "登录有效，已保活并保存更新后的会话"})
 	} else if _, expired := err.(sessionExpired); expired {
 		merge(state, M{"state": "expired", "message": "网络学堂需要重新认证，请运行 avatarthu login thu"})

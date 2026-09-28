@@ -65,6 +65,12 @@ func Main(args []string) (code int) {
 		a.configure(args[1:])
 	case "status":
 		a.status()
+	case "edit":
+		f := flag.NewFlagSet("edit", flag.ContinueOnError)
+		noOpen := f.Bool("no-open", false, "只输出编辑页地址")
+		check(f.Parse(args[1:]))
+		ensure(f.NArg() <= 1, "用法：avatarthu edit [--no-open] [作业编号]")
+		a.openEditor(f.Arg(0), *noOpen)
 	case "doctor":
 		okay := true
 		for _, r := range a.inspectPair(a.pairing()) {
@@ -332,6 +338,7 @@ avatarthu service start|stop|status         管理后台进程
 avatarthu menubar start|stop|status         macOS 原生菜单栏监控
 avatarthu run [--sync-only] [--task ID]     立即扫描或处理
 avatarthu revise ID --feedback "修改意见"  本地提出修改
+avatarthu edit [--no-open] [ID]            编辑报告、局部调用 Agent、提交定稿
 avatarthu keepalive status|run              查看或立即保活
 avatarthu notifications on|off              可选飞书推送
 avatarthu doctor                           检查两种执行器的安装和登录
