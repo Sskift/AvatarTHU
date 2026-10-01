@@ -376,33 +376,21 @@ func (a *App) snapshot(st, r M, job string) {
 		src := inside(job, rel)
 		dst := filepath.Join(target, filepath.Base(src))
 		copyFile(src, dst)
+		info, err := os.Stat(src)
+		check(err)
+		check(os.Chmod(dst, info.Mode().Perm()))
 		files = append(files, dst)
 		artifacts = append(artifacts, M{"path": dst, "sha256": digest(dst)})
 	}
 	report := filepath.Join(target, "review.md")
 	copyFile(inside(job, "review.md"), report)
 	var submission, hash any
-	if len(files) == 1 {
+	if len(files) == 1 && !strings.EqualFold(filepath.Ext(files[0]), ".zip") {
 		submission = files[0]
 		hash = digest(files[0])
-	} else if len(files) > 1 {
+	} else if len(files) > 0 {
 		bundle := filepath.Join(target, "submission.zip")
-		f, e := os.OpenFile(bundle, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
-		check(e)
-		defer f.Close()
-		z := zip.NewWriter(f)
-		for _, p := range files {
-			entry, e := z.Create(filepath.Base(p))
-			check(e)
-			src, e := os.Open(p)
-			check(e)
-			_, e = io.Copy(entry, src)
-			src.Close()
-			check(e)
-		}
-		check(z.Close())
-		check(f.Sync())
-		check(f.Close())
+		buildSubmissionZIP(bundle, files)
 		submission = bundle
 		hash = digest(bundle)
 	}

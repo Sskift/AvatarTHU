@@ -65,6 +65,13 @@ func Main(args []string) (code int) {
 		a.configure(args[1:])
 	case "status":
 		a.status()
+	case "export":
+		ensure(len(args) >= 2, "用法：avatarthu export 作业编号 [--artifact 文件名]")
+		f := flag.NewFlagSet("export", flag.ContinueOnError)
+		artifact := f.String("artifact", "", "只导出指定产物，例如完整项目 ZIP")
+		check(f.Parse(args[2:]))
+		ensure(f.NArg() == 0, "用法：avatarthu export 作业编号 [--artifact 文件名]")
+		fmt.Println(a.exportSubmission(args[1], *artifact))
 	case "web":
 		f := flag.NewFlagSet("web", flag.ContinueOnError)
 		noOpen := f.Bool("no-open", false, "只输出工作台地址")
@@ -352,6 +359,7 @@ avatarthu configure --writer claude --reviewer codex  分别选择主写和复�
 avatarthu configure --reviewer claude      只更换复审 harness；两角色均可选 claude/codex
 avatarthu configure --poll-interval 12h     设置课程轮询，保活固定 10 分钟
 avatarthu configure --max-review-rounds 3   复审不通过自动重写，0 表示不限
+avatarthu export 作业编号                  导出单层提交包，保留已发布版本
 avatarthu service start|stop|status         管理后台进程
 avatarthu menubar start|stop|status         macOS 原生菜单栏监控
 avatarthu run [--sync-only] [--task ID]     立即扫描或处理

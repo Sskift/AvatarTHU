@@ -237,6 +237,9 @@ func (a *App) workspaceTask(id string) M {
 		seen := map[int]bool{}
 		for i := len(histories) - 1; i >= 0; i-- {
 			r := histories[i]
+			if boolean(r, "artifacts_removed") {
+				continue
+			}
 			n := number(r, "revision", 1)
 			if seen[n] {
 				continue

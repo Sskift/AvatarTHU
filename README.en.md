@@ -336,6 +336,8 @@ Drafts, images, request receipts, and backups live in the assignment's `editor/`
 
 New reports include `report.md` and `report-source.zip` (Markdown plus relative image paths), so editable sources are published with each revision in the same review document. For older reports that have no source, paste Markdown into the editor. The editor listens only on the local computer; Feishu remains the remote review and notification entry point.
 
+Submission packages use one archive layer. Project ZIPs and report-source ZIPs offered as separate downloads are expanded into the final package, preserving relative paths and executable permissions. Extract once to access the report, program, and source. Required compressed runtime data stays intact and needs no manual extraction. Both writer and reviewer follow this delivery rule. Use `avatarthu export TASK_ID` to export an existing revision into the assignment's `exports/rVERSION/` directory. If a complete project archive already contains the report, add `--artifact filename.zip` to export only that project. This preserves published artifacts and the files bound to existing cards, and does not upload homework.
+
 ## Execution errors and recovery
 
 The menu bar and `avatarthu status` show the reason for a failed Feishu connection, consecutive failures, and the next retry time. App connection conflicts, authorization, permissions, and CLI version errors retry every 15 minutes. Temporary disconnections back off through 1, 2, 4, 8, and 15 minutes. Open “飞书连接异常详情” for details, then choose “重连飞书” or run `avatarthu reconnect lark` after resolving the cause. The error remains visible until the listener actually becomes ready.

@@ -74,6 +74,7 @@ func (a *App) seedEditor(st M) M {
 				p := str(artifact, "path")
 				if strings.EqualFold(filepath.Ext(p), ".md") && filepath.Base(p) != "review.md" && exists(p) {
 					markdown = string(readBytes(p))
+					copyEditorImages(filepath.Dir(p), source)
 					break
 				}
 			}

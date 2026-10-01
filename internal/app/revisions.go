@@ -175,6 +175,9 @@ func (a *App) revisionChanges(st M, local bool, attach func(string, string) stri
 	if len(previous) == 0 {
 		return strings.Join(append(blocks, paragraph("没有可核对的上版产物记录，无法生成文件差异；从后续版本开始保留对照。")), "\n")
 	}
+	if boolean(previous, "artifacts_removed") {
+		return strings.Join(append(blocks, paragraph("旧版交付文件已按要求清理，历次独立复审记录保留在第五部分。")), "\n")
+	}
 	oldRevision := number(previous, "revision", 1)
 	blocks = append(blocks, paragraph(fmt.Sprintf("文件对照：第 %d 版 → 第 %d 版，依据冻结产物的实际内容。", oldRevision, number(st, "revision", 1))))
 	if u, e := url.Parse(str(obj(previous, "review_doc"), "url")); e == nil && u.Scheme == "https" && u.Host != "" && u.String() != str(obj(st, "review_doc"), "url") {
