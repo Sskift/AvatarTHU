@@ -65,6 +65,9 @@ func Main(args []string) (code int) {
 		a.configure(args[1:])
 	case "status":
 		a.status()
+	case "files":
+		ensure(len(args) == 2, "用法：avatarthu files 作业编号")
+		fmt.Println(a.submissionFolder(args[1]))
 	case "export":
 		ensure(len(args) >= 2, "用法：avatarthu export 作业编号 [--artifact 文件名]")
 		f := flag.NewFlagSet("export", flag.ContinueOnError)
@@ -345,6 +348,9 @@ func (a *App) status() {
 		if str(st, "local_review") != "" {
 			fmt.Println("  本地审阅：" + str(st, "local_review"))
 		}
+		if folder := filepath.Join(a.outputDir(st), "submission"); str(st, "submission") != "" && exists(folder) {
+			fmt.Println("  最终提交目录：" + folder)
+		}
 	}
 }
 func printHelp() {
@@ -360,6 +366,7 @@ avatarthu configure --reviewer claude      只更换复审 harness；两角色�
 avatarthu configure --poll-interval 12h     设置课程轮询，保活固定 10 分钟
 avatarthu configure --max-review-rounds 3   复审不通过自动重写，0 表示不限
 avatarthu export 作业编号                  导出单层提交包，保留已发布版本
+avatarthu files 作业编号                   校验最终提交文件夹并输出路径
 avatarthu service start|stop|status         管理后台进程
 avatarthu menubar start|stop|status         macOS 原生菜单栏监控
 avatarthu run [--sync-only] [--task ID]     立即扫描或处理

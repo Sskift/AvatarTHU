@@ -84,6 +84,28 @@ func TestWorkspaceFileVisibilityAndAuthentication(t *testing.T) {
 		t.Fatal("submission changed")
 	}
 }
+
+func TestWorkspaceListsDownloadsOnceAndStillServesSubmissionContents(t *testing.T) {
+	a, st := editorFixture(t)
+	c := a.workspaceCourses()[0]
+	artifact := str(objects(st["artifacts"])[0], "path")
+	copyPath := filepath.Join(a.outputDir(st), "submission", filepath.Base(artifact))
+	copyRelative := filepath.ToSlash(relative(c.Dir, copyPath))
+	listed := false
+	for _, file := range a.workspaceFiles(c) {
+		if str(file, "path") == copyRelative {
+			t.Fatal("submission contents duplicated in download list")
+		}
+		listed = listed || str(file, "path") == filepath.ToSlash(relative(c.Dir, artifact))
+	}
+	if !listed {
+		t.Fatal("original download is missing")
+	}
+	r := editorCall(t, a, "/api/workspace/file?"+url.Values{"course": {c.ID}, "path": {copyRelative}}.Encode(), nil)
+	if r.Code != 200 || !bytes.Equal(r.Body.Bytes(), readBytes(artifact)) {
+		t.Fatal("submission content is inaccessible", r.Code, r.Body.String())
+	}
+}
 func uploadWorkspace(t *testing.T, a *App, c workspaceCourse, name, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buffer bytes.Buffer

@@ -113,6 +113,11 @@ func (a *App) workspaceFiles(c workspaceCourse) []M {
 	for _, root := range roots {
 		for _, file := range visibleFiles(root) {
 			rel := filepath.ToSlash(relative(c.Dir, file))
+			parts := strings.Split(rel, "/")
+			// Index downloads once; the submission copy remains directly accessible.
+			if len(parts) >= 6 && parts[0] == "homework" && parts[2] == "outputs" && parts[4] == "submission" {
+				continue
+			}
 			kind := publicCourseFile(rel)
 			if kind == "" {
 				continue

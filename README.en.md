@@ -336,7 +336,9 @@ Drafts, images, request receipts, and backups live in the assignment's `editor/`
 
 New reports include `report.md` and `report-source.zip` (Markdown plus relative image paths), so editable sources are published with each revision in the same review document. For older reports that have no source, paste Markdown into the editor. The editor listens only on the local computer; Feishu remains the remote review and notification entry point.
 
-Submission packages use one archive layer. Project ZIPs and report-source ZIPs offered as separate downloads are expanded into the final package, preserving relative paths and executable permissions. Extract once to access the report, program, and source. Required compressed runtime data stays intact and needs no manual extraction. Both writer and reviewer follow this delivery rule. Use `avatarthu export TASK_ID` to export an existing revision into the assignment's `exports/rVERSION/` directory. If a complete project archive already contains the report, add `--artifact filename.zip` to export only that project. This preserves published artifacts and the files bound to existing cards, and does not upload homework.
+Submission packages use one archive layer. Project ZIPs and report-source ZIPs offered as separate downloads are expanded into the final package, preserving relative paths and executable permissions. Extract once to access the report, program, and source. Required compressed runtime data stays intact and needs no manual extraction. New revisions store separate downloads in `outputs/rN/artifacts/`, the actual submission contents in `outputs/rN/submission/`, and the submission archive beside it as `submission.zip`. An assignment with one non-ZIP file still submits that original file directly. Both writer and reviewer follow this delivery rule.
+
+Run `avatarthu files TASK_ID` to verify frozen files, create a missing `submission/` directory or verify an existing one, and print the paths. It does not modify originals, repack archives, change state, or update cards. If an existing `submission/` differs from the frozen contents, the command reports an error without overwriting it. For a separate export, use `avatarthu export TASK_ID` to write a single-layer submission package into the assignment's `exports/rVERSION/` directory. If a complete project archive already contains the report, add `--artifact filename.zip` to export only that project. Export preserves published artifacts and the files bound to existing cards, and does not upload homework.
 
 ## Execution errors and recovery
 
@@ -364,7 +366,7 @@ Recovery queues failed writing/review work and resumes from completed stages usi
 
 ## Storage layout
 
-The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windows. On macOS, existing data stays in `~/.local/share/avatarthu`, with a symbolic link at the common entry point. Existing assignments are not copied.
+The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windows. New macOS installations store data in `~/.local/share/avatarthu` and use `~/.avatarthu` as a symbolic link. Existing legacy data roots remain supported without forced migration; `courses/` may also point to a legacy `data/courses/` directory. See the [directory conventions](docs/directory-layout.md) for the full rules (in Chinese).
 
 ```text
 ~/.avatarthu/
@@ -379,18 +381,25 @@ The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windo
 │       ├── notices/              # Original announcements and metadata
 │       ├── courseware/           # Incrementally downloaded materials
 │       └── homework/assignment-name--id/
-│           ├── source/           # Requirements and original attachments
-│           ├── runs/r1/round-1/  # Separate writer and reviewer directories
-│           ├── outputs/r1/       # Frozen submission and deliverable files
-│           ├── editor/           # Draft, images, scoped requests, manuscript handoffs
-│           ├── reviews/r1/       # Local review, cloud drafts, and receipts
+│           ├── source/           # Original requirements and attachments
+│           ├── runs/rN/round-M/  # Isolated executor jobs for each stage
+│           ├── outputs/rN/
+│           │   ├── artifacts/   # Separate downloads, reports, and editing bundles
+│           │   ├── submission/  # Actual submission contents with relative paths
+│           │   ├── submission.zip # One-layer package; submit a lone file directly
+│           │   └── review.md    # Writer's notes, kept at the revision root for now
+│           ├── reviews/rN/       # Independent reviews, review documents, receipts
+│           ├── editor/           # Drafts, images, scoped requests, manuscript snapshots
+│           │   └── exports/      # Editor draft exports, such as report.html
+│           ├── work/activity-date/ # Manual experiments, e.g. check-20261006
+│           ├── exports/rN/       # Manually exported submission packages
 │           └── state.json
 ├── data/                         # Task index, schedule, delivery receipts
 ├── logs/                         # Background and execution error logs
 └── tools/                        # Optional Lark CLI installation
 ```
 
-Legacy `outbox/`, `data/reviews/`, and previously sent cards remain compatible; frozen files are not moved. Set `AVATARTHU_HOME` to use an independent data directory. Course data, sessions, accounts, logs, and generated assignments do not belong in Git.
+Legacy flat `outputs/rN/` directories, `outbox/`, `data/reviews/`, and previously sent cards remain compatible; originals are not moved to match the new layout. `avatarthu files TASK_ID` uses the recorded frozen paths without rewriting old revisions into the new structure. Set `AVATARTHU_HOME` to use an independent data directory. The repository contains only source, documentation, tests, and licenses; keep course data, sessions, accounts, logs, experiments, and generated assignments outside Git.
 
 ## Common commands
 
@@ -401,6 +410,8 @@ avatarthu run --task TASK_ID      # Sync, then process only the specified assign
 avatarthu keepalive run           # Keep alive now and attempt session recovery
 avatarthu web                     # Open the course, file, and deliverable workspace
 avatarthu edit                    # Edit reports and hand off a final manuscript
+avatarthu files TASK_ID           # Verify frozen files and submission contents; show paths
+avatarthu export TASK_ID          # Write a separate submission package under exports/
 avatarthu status                  # Services, authentication, tasks, and review links
 avatarthu service stop            # Stop the background service; preserve data
 avatarthu menubar status          # macOS menu bar status

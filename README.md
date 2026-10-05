@@ -334,7 +334,9 @@ avatarthu notifications on
 
 后续生成的报告同时交付 `report.md` 和 `report-source.zip`（Markdown 与相对路径图片），每版都进入同一个审阅文档。旧报告如果没有可编辑源文件，可以在 Markdown 页签粘贴正文。本地编辑页只监听本机，飞书继续提供远程审阅与通知入口。
 
-提交包只压缩一层：系统将独立下载用的项目 ZIP、报告源码 ZIP 展开合并，解压一次即可找到报告、程序和源码，保留相对路径与执行权限。程序运行必需的压缩数据保持原样，无需手动解压。主写和复审都遵循这一交付原则。已有版本可以运行 `avatarthu export 作业编号` 导出单层提交包到作业目录的 `exports/r版本/`；完整项目包已包含报告时，可加 `--artifact 文件名.zip` 只导出该项目。原产物与卡片对应的文件保持不变；导出本身不提交网络学堂。
+提交包只压缩一层：系统将独立下载用的项目 ZIP、报告源码 ZIP 展开合并，解压一次即可找到报告、程序和源码，保留相对路径与执行权限。程序运行必需的压缩数据保持原样，无需手动解压。新版本将独立下载件放在 `outputs/rN/artifacts/`，实际提交内容放在 `outputs/rN/submission/`，提交包为旁边的 `submission.zip`；只有一个非 ZIP 文件时，仍直接提交原文件。主写和复审都遵循这一交付原则。
+
+运行 `avatarthu files 作业编号` 可校验冻结文件、补齐或校验 `submission/`，并打印文件路径；它不会修改原件、重打包、改变状态或更新卡片。已有 `submission/` 与冻结内容不一致时会报错，不会覆盖。需要另行导出时，使用 `avatarthu export 作业编号` 将单层提交包写入作业目录的 `exports/r版本/`；完整项目包已包含报告时，可加 `--artifact 文件名.zip` 只导出该项目。导出保留原产物与卡片绑定的文件，也不提交网络学堂。
 
 ## 执行异常与恢复
 
@@ -362,7 +364,7 @@ avatarthu retry --tool codex
 
 ## 文件在哪里
 
-统一入口为 `~/.avatarthu`，Windows 对应 `%USERPROFILE%\.avatarthu`。macOS 为保留历史数据，实际目录继续使用 `~/.local/share/avatarthu`，入口使用符号链接，不复制已有作业。
+统一入口为 `~/.avatarthu`，Windows 对应 `%USERPROFILE%\.avatarthu`。macOS 新安装将数据实体放在 `~/.local/share/avatarthu`，以 `~/.avatarthu` 作为符号链接。已有的历史数据根继续使用，不强制迁移；`courses/` 也可以是指向历史 `data/courses/` 的入口。完整约定见[目录规范](docs/directory-layout.md)。
 
 ```text
 ~/.avatarthu/
@@ -377,18 +379,25 @@ avatarthu retry --tool codex
 │       ├── notices/              # 公告原文和元数据
 │       ├── courseware/           # 增量下载课件
 │       └── homework/作业名--作业标识/
-│           ├── source/           # 原题、说明和附件
-│           ├── runs/r1/round-1/  # 主写和独立复审的不同目录
-│           ├── outputs/r1/       # 冻结的提交文件与完整产物
+│           ├── source/           # 原题、说明和原始附件
+│           ├── runs/rN/round-M/  # 各阶段隔离执行器的 job
+│           ├── outputs/rN/
+│           │   ├── artifacts/   # 独立下载件、报告及编辑源文件包
+│           │   ├── submission/  # 实际提交内容，保留程序相对路径
+│           │   ├── submission.zip # 单层提交包；单文件作业直接提交原件
+│           │   └── review.md    # 本版主写说明，暂留版本根目录
+│           ├── reviews/rN/       # 独立复审记录、审阅文档和回执
 │           ├── editor/           # 草稿、图片、局部修改请求与定稿快照
-│           ├── reviews/r1/       # 本地审阅、云文档草稿和回执
+│           │   └── exports/      # 编辑器草稿导出，例如 report.html
+│           ├── work/活动-日期/   # 手动实验与临时加工，例如 check-20261006
+│           ├── exports/rN/       # 手动导出的提交包
 │           └── state.json
 ├── data/                         # 全局任务索引、调度与送达回执
 ├── logs/                         # 后台和执行错误日志
 └── tools/                        # 可选安装的 Lark CLI
 ```
 
-旧版本的 `outbox/`、`data/reviews/` 与已发送卡片继续兼容，不搬动已冻结的文件。可通过 `AVATARTHU_HOME` 指定独立数据目录。课程、会话、账号、日志和生成作业均不进入 Git。
+旧版平铺的 `outputs/rN/`、`outbox/`、`data/reviews/` 与已发送卡片继续兼容，不为符合新目录树而移动原件。`avatarthu files 作业编号` 使用记录中的冻结路径，不把旧版本重写成新布局。可通过 `AVATARTHU_HOME` 指定独立数据目录。仓库只放源码、文档、测试和许可证；课程、会话、账号、日志、实验数据和生成作业均保存在 Git 外。
 
 ## 常用命令
 
@@ -399,6 +408,8 @@ avatarthu run --task 作业编号      # 同步后只处理指定作业
 avatarthu keepalive run           # 立即保活并尝试恢复登录
 avatarthu web                     # 打开课程、文件和产物工作台
 avatarthu edit                    # 编辑报告、局部调用 Agent、提交定稿
+avatarthu files 作业编号          # 校验冻结文件及提交目录，打印路径
+avatarthu export 作业编号         # 另行导出单层提交包到 exports/
 avatarthu status                  # 服务、登录、作业和审阅入口
 avatarthu service stop            # 停止后台，保留数据
 avatarthu menubar status          # macOS 菜单栏状态

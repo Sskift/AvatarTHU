@@ -374,7 +374,7 @@ func (a *App) snapshot(st, r M, job string) {
 	artifacts := []M{}
 	for _, rel := range texts(r["files"]) {
 		src := inside(job, rel)
-		dst := filepath.Join(target, filepath.Base(src))
+		dst := filepath.Join(target, "artifacts", filepath.Base(src))
 		copyFile(src, dst)
 		info, err := os.Stat(src)
 		check(err)
@@ -393,6 +393,9 @@ func (a *App) snapshot(st, r M, job string) {
 		buildSubmissionZIP(bundle, files)
 		submission = bundle
 		hash = digest(bundle)
+	}
+	if file, ok := submission.(string); ok && file != "" {
+		materializeSubmission(file, filepath.Join(target, "submission"))
 	}
 	merge(st, M{"output_dir": target, "ready": r["ready"], "summary": r["summary"], "blockers": r["blockers"], "artifacts": artifacts, "report": report, "report_sha256": digest(report), "presentation": obj(r, "presentation"), "submission": submission, "sha256": hash, "nonce": randomID(16), "deliveries": M{}, "review_doc": review, "links_synced": false, "links_retry_at": nil, "status": "delivery_pending"})
 	for _, k := range []string{"card_message_id", "chat_id", "local_review", "delivery_mode"} {
