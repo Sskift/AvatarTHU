@@ -53,6 +53,13 @@ func submissionDirectoryWantFile(t *testing.T, name string, want []byte, mode os
 	}
 }
 
+func submissionDirectoryWantAbsent(t *testing.T, name string) {
+	t.Helper()
+	if _, err := os.Lstat(name); !os.IsNotExist(err) {
+		t.Fatalf("path must not exist: %s (error %v)", name, err)
+	}
+}
+
 func TestMaterializeSubmissionExtractsOnlyOuterZIP(t *testing.T) {
 	dir := t.TempDir()
 	source, destination := filepath.Join(dir, "submission.zip"), filepath.Join(dir, "submission")
@@ -142,9 +149,7 @@ func TestMaterializeSubmissionRejectsUnsafeArchivePaths(t *testing.T) {
 			if err := attempt(func() { materializeSubmission(source, destination) }); err == nil {
 				t.Fatal("unsafe archive path accepted")
 			}
-			if exists(destination) {
-				t.Fatal("failed archive left a partially materialized destination")
-			}
+			submissionDirectoryWantAbsent(t, destination)
 			submissionDirectoryWantFile(t, outside, []byte("untouched"), 0600)
 		})
 	}
@@ -169,9 +174,7 @@ func TestMaterializeSubmissionRejectsAmbiguousArchiveMembers(t *testing.T) {
 			if err := attempt(func() { materializeSubmission(source, destination) }); err == nil {
 				t.Fatal("ambiguous or non-regular ZIP member accepted")
 			}
-			if exists(destination) {
-				t.Fatal("failed archive replaced the destination")
-			}
+			submissionDirectoryWantAbsent(t, destination)
 		})
 	}
 }
@@ -347,9 +350,7 @@ func TestSubmissionFolderVerifiesAllFrozenFilesBeforeExtraction(t *testing.T) {
 			writeFile(name, []byte("tampered"), 0600)
 			before := readBytes(a.taskPath(str(st, "task_id")))
 			expectError(t, "产物已发生变化", func() { a.submissionFolder(str(st, "task_id")) })
-			if exists(filepath.Join(str(st, "output_dir"), "submission")) {
-				t.Fatal("tampered frozen files were extracted")
-			}
+			submissionDirectoryWantAbsent(t, filepath.Join(str(st, "output_dir"), "submission"))
 			if !bytes.Equal(before, readBytes(a.taskPath(str(st, "task_id")))) {
 				t.Fatal("failed directory access rewrote task state")
 			}
@@ -394,41 +395,54 @@ func TestSubmissionSnapshotSeparatesDownloadsAndPreservesSingleFileUpload(t *tes
 			} else if str(st, "submission") != str(objects(st["artifacts"])[0], "path") || exists(filepath.Join(out, "submission.zip")) {
 				t.Fatal("single non-ZIP deliverable was unnecessarily repackaged")
 			}
-			folder := a.submissionFolder(str(st, "task_id"))
+			folder := filepath.Join(out, "submission")
+			if info, err := os.Lstat(folder); err != nil || !info.IsDir() {
+				t.Fatalf("snapshot did not create the submission directory: %v", err)
+			}
 			if !bytes.Equal(readBytes(filepath.Join(folder, "答案.txt")), []byte("answer")) {
 				t.Fatal("submission directory lost the actual answer")
 			}
-			if exists(filepath.Join(folder, "artifacts")) || exists(filepath.Join(folder, "review.md")) || exists(filepath.Join(folder, "project.zip")) {
-				t.Fatal("editing downloads or writer review leaked into submission directory")
+			for _, name := range []string{"artifacts", "review.md", "project.zip"} {
+				submissionDirectoryWantAbsent(t, filepath.Join(folder, name))
 			}
 			if multiple {
 				submissionDirectoryWantFile(t, filepath.Join(folder, "program", "run"), []byte("executable"), 0755)
+			}
+			if got := a.submissionFolder(str(st, "task_id")); got != folder {
+				t.Fatalf("files command returned %s, want snapshot directory %s", got, folder)
 			}
 			a.verifiedFiles(readMap(a.taskPath(str(st, "task_id"))))
 		})
 	}
 }
 
-func TestFilesCommandPrintsSubmissionDirectoryWithoutChangingTask(t *testing.T) {
+func TestFilesAndStatusCommandsPrintSubmissionDirectoryWithoutChangingTask(t *testing.T) {
 	a, st := submissionDirectoryLegacyTask(t)
 	t.Setenv("AVATARTHU_HOME", a.Root)
 	tid := str(st, "task_id")
 	before := readBytes(a.taskPath(tid))
-	reader, writer, err := os.Pipe()
-	check(err)
-	original := os.Stdout
-	os.Stdout = writer
-	defer func() { os.Stdout = original }()
-	code := Main([]string{"files", tid})
-	check(writer.Close())
-	os.Stdout = original
-	output, err := io.ReadAll(reader)
-	check(err)
-	check(reader.Close())
-	if code != 0 || strings.TrimSpace(string(output)) != filepath.Join(str(st, "output_dir"), "submission") {
-		t.Fatalf("files command: code %d, output %q", code, output)
-	}
-	if !bytes.Equal(before, readBytes(a.taskPath(tid))) {
-		t.Fatal("files command changed the task or current-version card")
+	folder := filepath.Join(str(st, "output_dir"), "submission")
+	for _, args := range [][]string{{"files", tid}, {"status"}} {
+		reader, writer, err := os.Pipe()
+		check(err)
+		original := os.Stdout
+		os.Stdout = writer
+		defer func() { os.Stdout = original }()
+		code := Main(args)
+		check(writer.Close())
+		os.Stdout = original
+		output, err := io.ReadAll(reader)
+		check(err)
+		check(reader.Close())
+		want := folder
+		if args[0] == "status" {
+			want = "最终提交目录：" + folder
+		}
+		if code != 0 || !strings.Contains(string(output), want) {
+			t.Fatalf("%s command: code %d, output %q", args[0], code, output)
+		}
+		if !bytes.Equal(before, readBytes(a.taskPath(tid))) {
+			t.Fatalf("%s command changed the task or current-version card", args[0])
+		}
 	}
 }

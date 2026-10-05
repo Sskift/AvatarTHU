@@ -348,8 +348,11 @@ func (a *App) status() {
 		if str(st, "local_review") != "" {
 			fmt.Println("  本地审阅：" + str(st, "local_review"))
 		}
-		if folder := filepath.Join(a.outputDir(st), "submission"); str(st, "submission") != "" && exists(folder) {
-			fmt.Println("  最终提交目录：" + folder)
+		if str(st, "submission") != "" {
+			folder := filepath.Join(a.outputDir(st), "submission")
+			if info, err := os.Lstat(folder); err == nil && info.IsDir() {
+				fmt.Println("  最终提交目录：" + folder)
+			}
 		}
 	}
 }
