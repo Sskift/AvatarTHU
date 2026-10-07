@@ -1,5 +1,6 @@
 # AvatarTHU development
 
+- Develop, commit and push directly on `main`. Do not create development branches or pull requests unless the user explicitly asks.
 - Runtime and course data belong in `~/.local/share/avatarthu` on macOS, with `~/.avatarthu` as the friendly symlink. Windows uses `%USERPROFILE%\.avatarthu`. Never store runtime/course data in Git.
 - AvatarTHU is a native Go program. Do not reintroduce a Python runtime, venv, Selenium or an interpreter-bundling installer.
 - Keep the successful Feishu receipt durable before marking an announcement read.
