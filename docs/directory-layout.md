@@ -42,6 +42,10 @@ presentation/
 
 报告源 ZIP、复核日志、原始数据和生成工具留在 `workspace/` 或 `presentation/`。除非题目明确要求或程序运行必需，不加入最终提交清单。程序必需的压缩数据与 Office/JAR 文件保留原生格式。
 
+报告原始 Markdown 与相对路径图片一起保存在 `presentation/report-source/rN/`；冻结的 `report.md` 和 `report-source.zip` 仍属于该版本的独立下载件。提供可编辑源文件不等于把它加入最终提交清单。
+
+只有本次作业代码新增了原始附件或课程环境未包含的第三方依赖，才生成 `requirements.txt`，并列出实际新增的依赖。没有新增依赖时，不生成空文件、不重复抄写环境清单，也不把原附件中的 `requirements.txt` 复制进最终提交包；原始附件保留在 `workspace/source/`。
+
 ## Locate and verify
 
 `avatarthu files ID` 校验冻结原件及当前提交副本，打印顶层 `submission/`。`avatarthu export ID` 返回旁边的 `submission.zip`。`--artifact NAME` 单独导出的下载件放在 `workspace/exports/rN/`；编辑器 HTML 导出放在 `workspace/editor/exports/`。
