@@ -86,7 +86,7 @@ func (a *App) saveTask(st M) {
 	st["updated_at"] = stamp()
 	writeJSON(a.taskPath(str(st, "task_id")), st)
 	if dir := str(st, "assignment_dir"); dir != "" {
-		writeJSON(filepath.Join(dir, "state.json"), st)
+		writeJSON(assignmentPath(dir, "state.json"), st)
 	}
 }
 func (a *App) tasks() []M {
@@ -395,21 +395,26 @@ func inside(base, rel string) string {
 }
 func visibleFiles(base string) []string {
 	out := []string{}
-	check(filepath.WalkDir(base, func(p string, d os.DirEntry, e error) error {
-		if os.IsNotExist(e) && p == base {
+	root, err := filepath.EvalSymlinks(base)
+	if os.IsNotExist(err) {
+		return out
+	}
+	check(err)
+	check(filepath.WalkDir(root, func(p string, d os.DirEntry, e error) error {
+		if os.IsNotExist(e) && p == root {
 			return nil
 		}
 		if e != nil {
 			return e
 		}
-		if p != base && (strings.HasPrefix(d.Name(), ".") || d.Type()&os.ModeSymlink != 0) {
+		if p != root && (strings.HasPrefix(d.Name(), ".") || d.Type()&os.ModeSymlink != 0) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if d.Type().IsRegular() {
-			out = append(out, p)
+			out = append(out, filepath.Join(base, relative(root, p)))
 		}
 		return nil
 	}))

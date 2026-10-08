@@ -111,6 +111,10 @@ func (a *App) exportSubmission(tid, selected string) string {
 	st := readMap(a.taskPath(tid))
 	ensure(len(st) > 0 && len(objects(st["artifacts"])) > 0, "这份作业还没有可导出的产物")
 	a.verifiedFiles(st)
+	if selected == "" && str(st, "assignment_dir") != "" && usesAssignmentLayout(str(st, "assignment_dir")) {
+		folder := a.publishSubmission(st)
+		return filepath.Join(filepath.Dir(folder), "submission.zip")
+	}
 	files := []string{}
 	for _, artifact := range objects(st["artifacts"]) {
 		file := str(artifact, "path")
@@ -124,7 +128,7 @@ func (a *App) exportSubmission(tid, selected string) string {
 	if selected != "" && strings.EqualFold(filepath.Ext(selected), ".zip") {
 		name = selected
 	}
-	destination := filepath.Join(base, "exports", fmt.Sprintf("r%d", number(st, "revision", 1)), name)
+	destination := assignmentPath(base, "exports", fmt.Sprintf("r%d", number(st, "revision", 1)), name)
 	buildSubmissionZIP(destination, files)
 	return destination
 }

@@ -144,6 +144,19 @@ func validateWriter(r M, job string) M {
 		seen[p] = true
 		names[name] = true
 	}
+	if selected, present := r["submission_files"]; present {
+		paths := texts(selected)
+		ensure(!boolean(r, "ready") || len(paths) > 0, "没有指定最终提交文件")
+		chosen := map[string]bool{}
+		for i, p := range paths {
+			if !strings.HasPrefix(filepath.ToSlash(p), "final/") {
+				p = "final/" + filepath.ToSlash(p)
+			}
+			ensure(seen[p] && !chosen[p], "最终提交文件必须来自 files 且不能重复")
+			paths[i], chosen[p] = p, true
+		}
+		r["submission_files"] = paths
+	}
 	inside(job, "review.md")
 	if len(blockers) > 0 {
 		r["ready"] = false
@@ -236,6 +249,9 @@ func (a *App) review(st, result M, writerJob string, plan M) M {
 	files := texts(result["files"])
 	hashes := hashesFor(writerJob, files)
 	candidateHash := fingerprint(hashes)
+	if _, explicit := result["submission_files"]; explicit {
+		candidateHash = fingerprint([]any{hashes, texts(result["submission_files"])})
+	}
 	for _, entry := range objects(st["review_history"]) {
 		if str(entry, "writer_job") == writerJob && str(entry, "candidate_hash") == candidateHash {
 			return entry
@@ -253,11 +269,19 @@ func (a *App) review(st, result M, writerJob string, plan M) M {
 		for _, rel := range files {
 			copyFile(inside(writerJob, rel), filepath.Join(job, "candidate", strings.TrimPrefix(filepath.ToSlash(rel), "final/")))
 		}
+		selected := texts(result["submission_files"])
+		if _, explicit := result["submission_files"]; !explicit {
+			selected = files
+		}
+		manifest := filepath.Join(job, "submission-files.json")
+		writeJSON(manifest, M{"files": selected})
+		manifestHash := digest(manifest)
 		st["status"] = "reviewing"
 		st["review_attempt"] = M{"job": job, "writer_job": writerJob, "candidate_hash": candidateHash}
 		a.saveTask(st)
 		value := a.engine(str(plan, "reviewer"), job, reviewerPrompt(job), reviewerSchema, "reviewer", plan)
 		validateReview(value)
+		ensure(digest(manifest) == manifestHash, "复审修改了提交清单，将重新开启独立复审")
 		after := M{}
 		for _, rel := range files {
 			after[rel] = digest(inside(filepath.Join(job, "candidate"), strings.TrimPrefix(filepath.ToSlash(rel), "final/")))
@@ -321,7 +345,7 @@ func (a *App) process(st M) {
 		job = str(st, "job")
 		if job == "" || (!exists(filepath.Join(job, "complete.json")) && str(readMap(filepath.Join(job, "execution.json")), "completed_at") == "") {
 			base := strDefault(st, "assignment_dir", a.data("jobs", str(st, "task_id")))
-			job = filepath.Join(base, "runs", fmt.Sprintf("r%d", number(st, "revision", 1)), fmt.Sprintf("round-%d", number(st, "review_round", 1)), "writer-"+randomID(5))
+			job = assignmentPath(base, "runs", fmt.Sprintf("r%d", number(st, "revision", 1)), fmt.Sprintf("round-%d", number(st, "review_round", 1)), "writer-"+randomID(5))
 			mkdir(job)
 			a.prepare(st, job)
 			writeJSON(filepath.Join(job, "execution-plan.json"), plan)
@@ -366,12 +390,17 @@ func (a *App) snapshot(st, r M, job string) {
 	}
 	base := filepath.Join(a.Root, "outbox", str(st, "task_id"))
 	if d := str(st, "assignment_dir"); d != "" {
-		base = filepath.Join(d, "outputs")
+		base = assignmentPath(d, "outputs")
 	}
 	target := filepath.Join(base, fmt.Sprintf("r%d", number(st, "revision", 1)))
 	mkdir(target)
 	files := []string{}
 	artifacts := []M{}
+	selected := map[string]bool{}
+	for _, p := range texts(r["submission_files"]) {
+		selected[p] = true
+	}
+	_, explicitSubmission := r["submission_files"]
 	for _, rel := range texts(r["files"]) {
 		src := inside(job, rel)
 		dst := filepath.Join(target, "artifacts", filepath.Base(src))
@@ -379,7 +408,9 @@ func (a *App) snapshot(st, r M, job string) {
 		info, err := os.Stat(src)
 		check(err)
 		check(os.Chmod(dst, info.Mode().Perm()))
-		files = append(files, dst)
+		if !explicitSubmission || selected[rel] {
+			files = append(files, dst)
+		}
 		artifacts = append(artifacts, M{"path": dst, "sha256": digest(dst)})
 	}
 	report := filepath.Join(target, "review.md")
@@ -397,9 +428,16 @@ func (a *App) snapshot(st, r M, job string) {
 	if file, ok := submission.(string); ok && file != "" {
 		materializeSubmission(file, filepath.Join(target, "submission"))
 	}
-	merge(st, M{"output_dir": target, "ready": r["ready"], "summary": r["summary"], "blockers": r["blockers"], "artifacts": artifacts, "report": report, "report_sha256": digest(report), "presentation": obj(r, "presentation"), "submission": submission, "sha256": hash, "nonce": randomID(16), "deliveries": M{}, "review_doc": review, "links_synced": false, "links_retry_at": nil, "status": "delivery_pending"})
+	next := M{}
+	merge(next, st)
+	merge(next, M{"output_dir": target, "ready": r["ready"], "summary": r["summary"], "blockers": r["blockers"], "artifacts": artifacts, "report": report, "report_sha256": digest(report), "presentation": obj(r, "presentation"), "submission": submission, "sha256": hash, "nonce": randomID(16), "deliveries": M{}, "review_doc": review, "links_synced": false, "links_retry_at": nil, "status": "delivery_pending"})
 	for _, k := range []string{"card_message_id", "chat_id", "local_review", "delivery_mode"} {
-		delete(st, k)
+		delete(next, k)
 	}
+	if str(next, "submission") != "" {
+		a.publishSubmission(next)
+	}
+	clear(st)
+	merge(st, next)
 	a.saveTask(st)
 }

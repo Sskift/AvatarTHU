@@ -1,68 +1,59 @@
-# 目录规范
+# Directory layout
 
-仓库只保存源码、文档、测试和许可证。课程材料、运行状态、账号、日志、实验数据与作业产物都放在 Git 外的数据根目录。
-
-## 数据根与旧路径
-
-- macOS 新安装：数据实体为 `~/.local/share/avatarthu`，`~/.avatarthu` 是访问它的符号链接。
-- Windows：使用 `%USERPROFILE%\.avatarthu`。
-- 已有安装：保留原数据根，包括实体目录形式的 `~/.avatarthu`；不为统一目录而迁移、复制或删除历史数据。`courses/` 可以继续指向历史 `data/courses/`。
-- 自定义安装：用 `AVATARTHU_HOME` 指定独立数据根。
-
-下文的路径均相对于一份作业的目录：`courses/学期/课程名--标识/homework/作业名--标识/`。先运行 `avatarthu status` 获取作业编号，再用 `avatarthu files 作业编号` 查看记录中的实际路径，不凭目录名称猜测当前版本。
-
-## 新作业与新版本
+每份作业完成后，根目录只保留四个入口。所有新建的文件名与目录名使用英文 ASCII 字符，包括中间过程路径；界面和文档正文仍可使用中文。
 
 ```text
-作业目录/
-├── source/                     # 原题、说明、原始附件
-├── runs/rN/round-M/             # 主写、复审等阶段各自隔离的 job
-├── outputs/rN/
-│   ├── artifacts/              # 独立下载件和报告编辑包
-│   ├── submission/             # 实际提交内容集合
-│   ├── submission.zip          # 与 submission/ 同级的单层提交包
-│   └── review.md               # 本版主写说明，暂留版本根目录
-├── reviews/rN/                 # 每次独立复审记录、审阅文档和回执
-├── editor/                     # 可编辑草稿、图片、请求及定稿快照
-│   └── exports/                # 编辑器草稿导出，例如 report.html
-├── work/活动-日期/             # 手动实验或临时加工，如 verify-20261006
-├── exports/rN/                 # 手动导出的提交包
-└── state.json                  # 程序管理的作业状态
+assignment/
+├── submission/
+├── submission.zip
+├── workspace/
+└── presentation/
 ```
 
-按用途选择目录：
+- `submission/`：当前要交给老师的最小完整文件集。保留完整程序、必要依赖和相对路径；报告不重复放多种格式，除非题目要求。
+- `submission.zip`：与该文件夹内容一致的单层压缩包。解压一次即可使用。单文件作业的自动上传仍可直接使用原文件。
+- `workspace/`：原题与附件、草稿、实验数据、日志、环境、每轮执行现场、修改记录、历史提交副本以及程序状态。
+- `presentation/`：AvatarTHU 展示和编辑所需的报告源文件、HTML/PDF、独立下载件、各版本冻结原件、复审页面与回执。
 
-| 用途 | 写入位置 | 规则 |
-| --- | --- | --- |
-| 下载题目和原始附件 | `source/` | 保留原始文件字节；加工副本放入 job 或 `work/`。 |
-| 自动主写、独立复审 | `runs/` 下各自的 job | 每阶段使用隔离目录与新会话。 |
-| 发布报告、项目包、报告源文件包等独立下载件 | `outputs/rN/artifacts/` | 冻结后保留原件；修改通过新版本完成。 |
-| 查看或提交本版内容 | `outputs/rN/submission/` | 只放实际提交内容，保留所需相对路径、执行权限和原生格式。 |
-| 保留独立复审 | `reviews/rN/` | 每次已完成的复审单独保留；`outputs/rN/review.md` 不替代这些记录。 |
-| 编辑正文、接收局部建议、保存定稿快照 | `editor/` | 草稿与冻结产物分开。 |
-| 手动验证、补跑实验、临时制作 | `work/<activity>-<date>/` | 按活动和日期分目录，不混入 `source/` 或冻结版本。 |
-| 导出编辑器草稿 HTML | `editor/exports/` | 保留草稿和冻结原件，导出供阅读的副本。 |
-| 另行导出提交包 | `exports/rN/` | 按版本保存手动导出的副本，保留冻结原件。 |
+首次完成前可以暂时只有 `workspace/` 与 `presentation/`。不要在根目录重新增加 `outputs/`、`exports/`、`runs/`、`editor/`、`source/` 或其他“最终版本”入口。
 
-提交包只有一层：解压 `submission.zip` 一次即可找到报告、可运行程序和源码。独立下载用的项目包和报告编辑包在形成提交内容时展开，不在最终包中重复嵌套；程序必需的压缩数据保持原生格式。只有一个非 ZIP 文件的作业仍直接提交该原文件，不额外包装成 ZIP。`submission/` 用于查看该版本的实际提交内容，不是修改冻结作业的入口。
+## Internal paths
 
-## 查找与校验文件
+```text
+workspace/
+├── source/
+├── runs/rN/round-M/
+├── editor/
+├── work/activity-YYYYMMDD/
+├── exports/rN/
+├── submission-history/
+├── assignment.json
+├── state.json
+└── submission.json
 
-```sh
-avatarthu status
-avatarthu files 作业编号
+presentation/
+├── outputs/rN/artifacts/
+├── outputs/rN/submission.zip
+├── outputs/rN/review.md
+└── reviews/rN/
 ```
 
-`files` 先校验记录中的冻结文件，再从已冻结的提交文件补齐缺失的 `submission/`，或校验已有目录，并打印相关路径。它不自动打开文件管理器，不改原件、不重打包、不改作业状态或卡片，也不上传作业。
+自动主写返回的 `files` 包含全部展示和编辑下载件，`submission_files` 明确选择实际提交项。两者分开；系统只将选中的文件合并为最终提交包。复审者收到原题、当前候选文件和提交清单；清单变化后重新复审，不沿用旧清单的结论。旧结果没有该字段时保留原有打包行为，避免改变冻结版本。
 
-已有 `submission/` 内容与冻结文件不一致时，命令报错并保留目录，不覆盖其中的改动。需要修改报告或程序时，用 `avatarthu edit 作业编号` 或 `avatarthu revise 作业编号 --feedback "修改意见"` 生成新版本；不要直接改冻结文件来消除校验错误。
+报告源 ZIP、复核日志、原始数据和生成工具留在 `workspace/` 或 `presentation/`。除非题目明确要求或程序运行必需，不加入最终提交清单。程序必需的压缩数据与 Office/JAR 文件保留原生格式。
 
-需要单独导出副本时使用：
+## Locate and verify
 
-```sh
-avatarthu edit --export-html 作业编号
-avatarthu export 作业编号
-avatarthu export 作业编号 --artifact 项目包.zip
-```
+`avatarthu files ID` 校验冻结原件及当前提交副本，打印顶层 `submission/`。`avatarthu export ID` 返回旁边的 `submission.zip`。`--artifact NAME` 单独导出的下载件放在 `workspace/exports/rN/`；编辑器 HTML 导出放在 `workspace/editor/exports/`。
 
-旧版平铺的 `outputs/rN/`、旧 `outbox/`、旧审阅目录和已有卡片继续按记录中的路径使用。`files` 可以补齐用于查看的提交目录，但不会移动旧版原件、把它们强制改成新布局，或更新已有卡片。已有的手动工作入口与导出路径也继续保留；新工作按上述用途归档。
+正常新版本更新最终入口前，先验证现有副本没有被修改，再将上一版副本收进 `workspace/submission-history/`。有改动则报错并保留，不覆盖。文件查看和手动导出不会修改作业状态、卡片或回执，也不会上传作业。
+
+手动筛选的最小提交包可以登记在 `workspace/submission.json`，记录来源版本及哈希；`files` 和默认 `export` 使用同一份记录。该副本不自动替换旧卡片绑定的冻结文件。生成新的正式卡片仍走新版本及独立复审流程。
+
+## Legacy compatibility
+
+旧作业整理时，把旧现场收进 `workspace/legacy/`，展示资料收进 `presentation/`，保留旧绝对路径可访问，并记录目录映射。兼容入口位于旧位置；新作业根目录仍只有四项。不得因整理目录而改写旧文件字节、回执或审批信息。旧现场里已有的名称属于历史记录，新建路径全部使用英文。
+
+课程实体目录使用 `course-<id>/`。迁移旧课程时，在 `.course-layout.json` 保存原始 `identity_dir`，让工作台课程 ID 和已有链接保持不变；旧课程名称只作为兼容链接保留。
+
+macOS 新安装的数据实体仍在 `~/.local/share/avatarthu`，`~/.avatarthu` 是友好入口；已有物理数据根保持兼容。Windows 使用 `%USERPROFILE%\.avatarthu`。仓库只保存源码、文档、测试和许可证，所有课程和运行数据都在 Git 外。

@@ -350,6 +350,9 @@ func (a *App) status() {
 		}
 		if str(st, "submission") != "" {
 			folder := filepath.Join(a.outputDir(st), "submission")
+			if base := str(st, "assignment_dir"); base != "" && usesAssignmentLayout(base) {
+				folder = filepath.Join(assignmentRoot(base), "submission")
+			}
 			if info, err := os.Lstat(folder); err == nil && info.IsDir() {
 				fmt.Println("  最终提交目录：" + folder)
 			}

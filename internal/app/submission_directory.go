@@ -136,8 +136,5 @@ func (a *App) submissionFolder(tid string) string {
 	defer a.lock(tid, true)()
 	st := readMap(a.taskPath(tid))
 	ensure(len(st) > 0 && str(st, "submission") != "", "这份作业还没有冻结的提交文件")
-	source := a.verifiedFiles(st)
-	destination := filepath.Join(a.outputDir(st), "submission")
-	materializeSubmission(source, destination)
-	return destination
+	return a.publishSubmission(st)
 }

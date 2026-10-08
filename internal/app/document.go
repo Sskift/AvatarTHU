@@ -233,7 +233,7 @@ func imageData(path, member string) []byte {
 func (a *App) reviewDir(st M) string {
 	base := a.data("reviews", str(st, "task_id"))
 	if d := str(st, "assignment_dir"); d != "" {
-		base = filepath.Join(d, "reviews")
+		base = assignmentPath(d, "reviews")
 	}
 	return filepath.Join(base, fmt.Sprintf("r%d", number(st, "revision", 1)))
 }

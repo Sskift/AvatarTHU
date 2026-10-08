@@ -336,9 +336,9 @@ Drafts, images, request receipts, and backups live in the assignment's `editor/`
 
 New reports include `report.md` and `report-source.zip` (Markdown plus relative image paths), so editable sources are published with each revision in the same review document. For older reports that have no source, paste Markdown into the editor. The editor listens only on the local computer; Feishu remains the remote review and notification entry point.
 
-Submission packages use one archive layer. Project ZIPs and report-source ZIPs offered as separate downloads are expanded into the final package, preserving relative paths and executable permissions. Extract once to access the report, program, and source. Required compressed runtime data stays intact and needs no manual extraction. New revisions store separate downloads in `outputs/rN/artifacts/`, the actual submission contents in `outputs/rN/submission/`, and the submission archive beside it as `submission.zip`. An assignment with one non-ZIP file still submits that original file directly. Both writer and reviewer follow this delivery rule.
+Submission packages use one archive layer. The writer explicitly selects the minimal required files through `submission_files`; editing and presentation downloads remain separate. Each assignment root contains only `submission/`, `submission.zip`, `workspace/`, and `presentation/`. All new file and intermediate directory names use English ASCII characters.
 
-Run `avatarthu files TASK_ID` to verify frozen files, create a missing `submission/` directory or verify an existing one, and print the paths. It does not modify originals, repack archives, change state, or update cards. If an existing `submission/` differs from the frozen contents, the command reports an error without overwriting it. For a separate export, use `avatarthu export TASK_ID` to write a single-layer submission package into the assignment's `exports/rVERSION/` directory. If a complete project archive already contains the report, add `--artifact filename.zip` to export only that project. Export preserves published artifacts and the files bound to existing cards, and does not upload homework.
+`avatarthu files TASK_ID` verifies and prints the top-level submission folder. `avatarthu export TASK_ID` returns its matching ZIP. Modified copies are preserved rather than overwritten. Explicit artifact exports go under `workspace/exports/rN/`. Neither command uploads homework or changes existing cards.
 
 ## Execution errors and recovery
 
@@ -376,30 +376,21 @@ The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windo
 ├── session.json                  # Owner's Web Learning session
 ├── browser-profile/              # Dedicated browser login profile
 ├── courses/
-│   └── semester/course-name--id/
+│   └── semester/course-id/
 │       ├── course.json
 │       ├── notices/              # Original announcements and metadata
 │       ├── courseware/           # Incrementally downloaded materials
-│       └── homework/assignment-name--id/
-│           ├── source/           # Original requirements and attachments
-│           ├── runs/rN/round-M/  # Isolated executor jobs for each stage
-│           ├── outputs/rN/
-│           │   ├── artifacts/   # Separate downloads, reports, and editing bundles
-│           │   ├── submission/  # Actual submission contents with relative paths
-│           │   ├── submission.zip # One-layer package; submit a lone file directly
-│           │   └── review.md    # Writer's notes, kept at the revision root for now
-│           ├── reviews/rN/       # Independent reviews, review documents, receipts
-│           ├── editor/           # Drafts, images, scoped requests, manuscript snapshots
-│           │   └── exports/      # Editor draft exports, such as report.html
-│           ├── work/activity-date/ # Manual experiments, e.g. check-20261006
-│           ├── exports/rN/       # Manually exported submission packages
-│           └── state.json
+│       └── homework/assignment-id/
+│           ├── submission/       # Files to submit
+│           ├── submission.zip    # Matching single-layer ZIP
+│           ├── workspace/        # Inputs, runs, drafts, experiments, state
+│           └── presentation/     # Display artifacts, frozen versions, reviews
 ├── data/                         # Task index, schedule, delivery receipts
 ├── logs/                         # Background and execution error logs
 └── tools/                        # Optional Lark CLI installation
 ```
 
-Legacy flat `outputs/rN/` directories, `outbox/`, `data/reviews/`, and previously sent cards remain compatible; originals are not moved to match the new layout. `avatarthu files TASK_ID` uses the recorded frozen paths without rewriting old revisions into the new structure. Set `AVATARTHU_HOME` to use an independent data directory. The repository contains only source, documentation, tests, and licenses; keep course data, sessions, accounts, logs, experiments, and generated assignments outside Git.
+Legacy paths, file bytes and receipts remain compatible. Reorganization moves old execution state under `workspace/legacy/` and display files under `presentation/`, with old locations retained as compatibility entries outside the new four-entry root. See [directory conventions](docs/directory-layout.md). Runtime and course data stay outside Git.
 
 ## Common commands
 
@@ -411,7 +402,7 @@ avatarthu keepalive run           # Keep alive now and attempt session recovery
 avatarthu web                     # Open the course, file, and deliverable workspace
 avatarthu edit                    # Edit reports and hand off a final manuscript
 avatarthu files TASK_ID           # Verify frozen files and submission contents; show paths
-avatarthu export TASK_ID          # Write a separate submission package under exports/
+avatarthu export TASK_ID          # Print the current submission.zip path
 avatarthu status                  # Services, authentication, tasks, and review links
 avatarthu service stop            # Stop the background service; preserve data
 avatarthu menubar status          # macOS menu bar status

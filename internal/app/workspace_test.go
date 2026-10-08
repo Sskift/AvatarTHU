@@ -126,12 +126,12 @@ func TestWorkspaceUploadRenameAndRecoverableRemoval(t *testing.T) {
 	a, st := editorFixture(t)
 	c := a.workspaceCourses()[0]
 	before := digest(str(st, "submission"))
-	editorResult(t, uploadWorkspace(t, a, c, "补充.txt", "用户补充"))
-	if r := uploadWorkspace(t, a, c, "补充.txt", "overwrite"); r.Code != 409 {
+	editorResult(t, uploadWorkspace(t, a, c, "supplement.txt", "用户补充"))
+	if r := uploadWorkspace(t, a, c, "supplement.txt", "overwrite"); r.Code != 409 {
 		t.Fatal("overwrote supplemental file")
 	}
-	editorResult(t, editorCall(t, a, "/api/workspace/file-action", M{"course": c.ID, "path": "courseware/user/补充.txt", "action": "rename", "name": "新名字.txt"}))
-	if string(readBytes(filepath.Join(c.Dir, "courseware", "user", "新名字.txt"))) != "用户补充" {
+	editorResult(t, editorCall(t, a, "/api/workspace/file-action", M{"course": c.ID, "path": "courseware/user/supplement.txt", "action": "rename", "name": "renamed.txt"}))
+	if string(readBytes(filepath.Join(c.Dir, "courseware", "user", "renamed.txt"))) != "用户补充" {
 		t.Fatal("rename changed contents")
 	}
 	for _, rel := range []string{"courseware/chapter.txt", filepath.ToSlash(relative(c.Dir, str(objects(st["artifacts"])[0], "path")))} {
@@ -139,12 +139,12 @@ func TestWorkspaceUploadRenameAndRecoverableRemoval(t *testing.T) {
 			t.Fatal("removed managed/frozen file")
 		}
 	}
-	editorResult(t, editorCall(t, a, "/api/workspace/file-action", M{"course": c.ID, "path": "courseware/user/新名字.txt", "action": "remove"}))
-	backups, _ := filepath.Glob(a.data("workspace-trash", "*", "新名字.txt"))
+	editorResult(t, editorCall(t, a, "/api/workspace/file-action", M{"course": c.ID, "path": "courseware/user/renamed.txt", "action": "remove"}))
+	backups, _ := filepath.Glob(a.data("workspace-trash", "*", "renamed.txt"))
 	if len(backups) != 1 || string(readBytes(backups[0])) != "用户补充" {
 		t.Fatal("deleted without recovery")
 	}
-	if exists(filepath.Join(c.Dir, "courseware", "user", "新名字.txt")) || digest(str(st, "submission")) != before {
+	if exists(filepath.Join(c.Dir, "courseware", "user", "renamed.txt")) || digest(str(st, "submission")) != before {
 		t.Fatal("incorrect removal or mutated frozen artifact")
 	}
 }

@@ -3,9 +3,11 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -117,5 +119,82 @@ func TestSingleArchiveSnapshotAndExportPreservePublishedState(t *testing.T) {
 	}
 	if _, err := os.Stat(exported); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSubmissionSelectionSeparatesPresentationArtifacts(t *testing.T) {
+	for _, program := range []bool{false, true} {
+		t.Run(fmt.Sprint(program), func(t *testing.T) {
+			a := testApp(t)
+			st := fixture(t, a)
+			job := filepath.Join(a.Root, "writer")
+			r := resultAt(job, "answer")
+			writeFile(filepath.Join(job, "final", "report.pdf"), []byte("report with embedded figures"), 0644)
+			writeFile(filepath.Join(job, "final", "report-source.zip"), submissionTestArchive(t, map[string][]byte{"report.md": []byte("editable"), "images/plot.png": []byte("image")}), 0600)
+			r["files"] = []string{"final/report.pdf", "final/report-source.zip"}
+			r["submission_files"] = []string{"report.pdf"}
+			if program {
+				writeFile(filepath.Join(job, "final", "project.zip"), submissionTestArchive(t, map[string][]byte{"requirements.txt": []byte("deps"), "timer_iotdb/lab1_inject.py": []byte("complete code")}), 0600)
+				r["files"] = append(texts(r["files"]), "final/project.zip")
+				r["submission_files"] = append(texts(r["submission_files"]), "project.zip")
+			}
+			r = validateWriter(r, job)
+			a.snapshot(st, r, job)
+			folder := filepath.Join(a.outputDir(st), "submission")
+			submissionDirectoryWantAbsent(t, filepath.Join(folder, "report.md"))
+			submissionDirectoryWantAbsent(t, filepath.Join(folder, "images"))
+			if len(visibleFiles(folder)) != map[bool]int{false: 1, true: 3}[program] {
+				t.Fatal("submission contains non-selected presentation material")
+			}
+			if len(objects(st["artifacts"])) != len(texts(r["files"])) {
+				t.Fatal("separate editing download was lost")
+			}
+			if !program && filepath.Ext(str(st, "submission")) != ".pdf" {
+				t.Fatal("single PDF upload was unnecessarily repackaged")
+			}
+		})
+	}
+}
+
+func TestSubmissionSelectionRejectsMissingDuplicateOrEmptyFiles(t *testing.T) {
+	for _, selected := range [][]string{{}, {"missing.pdf"}, {"答案.txt", "final/答案.txt"}} {
+		a := testApp(t)
+		job := filepath.Join(a.Root, "writer")
+		r := resultAt(job, "answer")
+		r["submission_files"] = selected
+		expectError(t, "提交文件", func() { validateWriter(r, job) })
+	}
+}
+
+func TestSubmissionSelectionRequiresFreshReviewWhenSelectionChanges(t *testing.T) {
+	a := testApp(t)
+	st := fixture(t, a)
+	job := filepath.Join(a.Root, "writer")
+	r := resultAt(job, "answer")
+	writeFile(filepath.Join(job, "final", "notes.txt"), []byte("supporting material"), 0600)
+	r["files"] = append(texts(r["files"]), "final/notes.txt")
+	r["submission_files"] = []string{"final/答案.txt"}
+	calls := 0
+	a.RunModel = func(_ string, reviewJob, _ string, _ M, role string, _ M) M {
+		calls++
+		manifest := texts(readMap(filepath.Join(reviewJob, "submission-files.json"))["files"])
+		if role != "reviewer" || !reflect.DeepEqual(manifest, texts(r["submission_files"])) {
+			t.Fatal("review did not receive the actual submission selection")
+		}
+		if exists(filepath.Join(reviewJob, "review.md")) {
+			t.Fatal("reviewer received writer self-assessment")
+		}
+		return M{"approved": true, "summary": "checked", "comments": []M{}, "checks": []string{"read candidate"}, "limitations": []string{}}
+	}
+	plan := M{"writer": "codex", "reviewer": "codex"}
+	a.review(st, r, job, plan)
+	a.review(st, r, job, plan)
+	if calls != 1 {
+		t.Fatal("unchanged review was not reused")
+	}
+	r["submission_files"] = texts(r["files"])
+	a.review(st, r, job, plan)
+	if calls != 2 || len(objects(st["review_history"])) != 2 {
+		t.Fatal("changed submission selection reused a stale review")
 	}
 }

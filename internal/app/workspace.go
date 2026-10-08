@@ -18,6 +18,12 @@ import (
 
 type workspaceCourse struct{ ID, Name, Semester, Dir string }
 
+func workspaceCourseID(dir string, semester, courseID any) string {
+	// Renaming a legacy course must not invalidate existing workspace links.
+	identity := strDefault(readMap(filepath.Join(dir, ".course-layout.json")), "identity_dir", dir)
+	return fingerprint([]any{semester, courseID, identity})[:16]
+}
+
 func (a *App) workspaceCourses() []workspaceCourse {
 	result := []workspaceCourse{}
 	seen := map[string]bool{}
@@ -32,7 +38,7 @@ func (a *App) workspaceCourses() []workspaceCourse {
 			m := readMap(p)
 			name := strDefault(m, "kcm", filepath.Base(dir))
 			semester := strDefault(m, "xnxq", filepath.Base(filepath.Dir(dir)))
-			result = append(result, workspaceCourse{fingerprint([]any{semester, str(m, "wlkcid"), dir})[:16], name, semester, dir})
+			result = append(result, workspaceCourse{workspaceCourseID(dir, semester, str(m, "wlkcid")), name, semester, dir})
 		}
 	}
 	for _, st := range a.tasks() {
@@ -48,7 +54,7 @@ func (a *App) workspaceCourses() []workspaceCourse {
 			continue
 		}
 		seen[dir] = true
-		result = append(result, workspaceCourse{fingerprint([]any{st["semester"], st["course_id"], dir})[:16], str(st, "course"), str(st, "semester"), dir})
+		result = append(result, workspaceCourse{workspaceCourseID(dir, st["semester"], st["course_id"]), str(st, "course"), str(st, "semester"), dir})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Semester != result[j].Semester {
@@ -90,6 +96,9 @@ func publicCourseFile(rel string) string {
 		return "notice"
 	}
 	if len(p) >= 4 && p[0] == "homework" {
+		if len(p) >= 5 && ((p[2] == "workspace" && p[3] == "source") || (p[2] == "presentation" && (p[3] == "outputs" || p[3] == "report-source"))) {
+			p = append(append([]string{}, p[:2]...), p[3:]...)
+		}
 		switch p[2] {
 		case "source":
 			return "assignment"
@@ -109,11 +118,27 @@ func (a *App) workspaceFiles(c workspaceCourse) []M {
 	for _, kind := range []string{"source", "outputs", "report-source"} {
 		paths, _ := filepath.Glob(filepath.Join(c.Dir, "homework", "*", kind))
 		roots = append(roots, paths...)
+		area := "presentation"
+		if kind == "source" {
+			area = "workspace"
+		}
+		paths, _ = filepath.Glob(filepath.Join(c.Dir, "homework", "*", area, kind))
+		roots = append(roots, paths...)
 	}
+	seen := map[string]bool{}
 	for _, root := range roots {
+		canonical, err := filepath.EvalSymlinks(root)
+		if err != nil || seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
+		root = canonical
 		for _, file := range visibleFiles(root) {
 			rel := filepath.ToSlash(relative(c.Dir, file))
 			parts := strings.Split(rel, "/")
+			if len(parts) > 3 && parts[2] == "presentation" {
+				parts = append(append([]string{}, parts[:2]...), parts[3:]...)
+			}
 			// Index downloads once; the submission copy remains directly accessible.
 			if len(parts) >= 6 && parts[0] == "homework" && parts[2] == "outputs" && parts[4] == "submission" {
 				continue
@@ -340,7 +365,7 @@ func (a *App) workspaceUpload(w http.ResponseWriter, r *http.Request, c workspac
 	f, header, e := r.FormFile("file")
 	check(e)
 	defer f.Close()
-	name := safeName(filepath.Base(header.Filename))
+	name := englishName(filepath.Base(header.Filename))
 	ensure(name != "" && name != "index.json" && !strings.HasPrefix(name, "."), "文件名无效")
 	defer a.lock("workspace-"+c.ID, true)()
 	dir := filepath.Join(c.Dir, "courseware", "user")
@@ -365,7 +390,7 @@ func (a *App) workspaceFileAction(c workspaceCourse, in M) M {
 	switch str(in, "action") {
 	case "rename":
 		name := strings.TrimSpace(str(in, "name"))
-		ensure(name != "" && name == safeName(name) && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\") && !strings.HasPrefix(name, "."), "文件名无效")
+		ensure(name != "" && name == englishName(name) && filepath.Base(name) == name && !strings.ContainsAny(name, "/\\") && !strings.HasPrefix(name, "."), "请使用有效英文文件名")
 		dest := filepath.Join(filepath.Dir(p), name)
 		ensure(workspaceAbsent(dest), "已有同名文件")
 		check(os.Rename(p, dest))

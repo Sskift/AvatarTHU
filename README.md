@@ -334,9 +334,9 @@ avatarthu notifications on
 
 后续生成的报告同时交付 `report.md` 和 `report-source.zip`（Markdown 与相对路径图片），每版都进入同一个审阅文档。旧报告如果没有可编辑源文件，可以在 Markdown 页签粘贴正文。本地编辑页只监听本机，飞书继续提供远程审阅与通知入口。
 
-提交包只压缩一层：系统将独立下载用的项目 ZIP、报告源码 ZIP 展开合并，解压一次即可找到报告、程序和源码，保留相对路径与执行权限。程序运行必需的压缩数据保持原样，无需手动解压。新版本将独立下载件放在 `outputs/rN/artifacts/`，实际提交内容放在 `outputs/rN/submission/`，提交包为旁边的 `submission.zip`；只有一个非 ZIP 文件时，仍直接提交原文件。主写和复审都遵循这一交付原则。
+提交包只压缩一层。主写用 `submission_files` 明确选择题目要求的最小完整文件集，展示、编辑下载件单独保存。每份作业根目录只保留 `submission/`、`submission.zip`、`workspace/`、`presentation/` 四项；所有新建文件与中间目录均使用英文 ASCII 名称。
 
-运行 `avatarthu files 作业编号` 可校验冻结文件、补齐或校验 `submission/`，并打印文件路径；它不会修改原件、重打包、改变状态或更新卡片。已有 `submission/` 与冻结内容不一致时会报错，不会覆盖。需要另行导出时，使用 `avatarthu export 作业编号` 将单层提交包写入作业目录的 `exports/r版本/`；完整项目包已包含报告时，可加 `--artifact 文件名.zip` 只导出该项目。导出保留原产物与卡片绑定的文件，也不提交网络学堂。
+`avatarthu files 作业编号` 校验并显示顶层提交文件夹，`avatarthu export 作业编号` 返回对应 ZIP。已有副本被修改时会报错并保留。指定独立下载件的导出位于 `workspace/exports/rN/`。这两个命令都不上传作业或修改已有卡片。
 
 ## 执行异常与恢复
 
@@ -374,30 +374,21 @@ avatarthu retry --tool codex
 ├── session.json                  # 本人网络学堂会话
 ├── browser-profile/              # 本项目的浏览器登录配置
 ├── courses/
-│   └── 学期/课程名--课程标识/
+│   └── semester/course-id/
 │       ├── course.json
 │       ├── notices/              # 公告原文和元数据
 │       ├── courseware/           # 增量下载课件
-│       └── homework/作业名--作业标识/
-│           ├── source/           # 原题、说明和原始附件
-│           ├── runs/rN/round-M/  # 各阶段隔离执行器的 job
-│           ├── outputs/rN/
-│           │   ├── artifacts/   # 独立下载件、报告及编辑源文件包
-│           │   ├── submission/  # 实际提交内容，保留程序相对路径
-│           │   ├── submission.zip # 单层提交包；单文件作业直接提交原件
-│           │   └── review.md    # 本版主写说明，暂留版本根目录
-│           ├── reviews/rN/       # 独立复审记录、审阅文档和回执
-│           ├── editor/           # 草稿、图片、局部修改请求与定稿快照
-│           │   └── exports/      # 编辑器草稿导出，例如 report.html
-│           ├── work/活动-日期/   # 手动实验与临时加工，例如 check-20261006
-│           ├── exports/rN/       # 手动导出的提交包
-│           └── state.json
+│       └── homework/assignment-id/
+│           ├── submission/       # Files to submit
+│           ├── submission.zip    # Matching single-layer ZIP
+│           ├── workspace/        # Inputs, runs, drafts, experiments, state
+│           └── presentation/     # Display artifacts, frozen versions, reviews
 ├── data/                         # 全局任务索引、调度与送达回执
 ├── logs/                         # 后台和执行错误日志
 └── tools/                        # 可选安装的 Lark CLI
 ```
 
-旧版平铺的 `outputs/rN/`、`outbox/`、`data/reviews/` 与已发送卡片继续兼容，不为符合新目录树而移动原件。`avatarthu files 作业编号` 使用记录中的冻结路径，不把旧版本重写成新布局。可通过 `AVATARTHU_HOME` 指定独立数据目录。仓库只放源码、文档、测试和许可证；课程、会话、账号、日志、实验数据和生成作业均保存在 Git 外。
+旧路径、文件字节和回执保持兼容。整理时旧现场收进 `workspace/legacy/`，展示资料收进 `presentation/`；旧位置保留兼容入口，新作业根目录只保留四项。详见[目录规范](docs/directory-layout.md)。所有课程和运行数据均保存在 Git 外。
 
 ## 常用命令
 
@@ -409,7 +400,7 @@ avatarthu keepalive run           # 立即保活并尝试恢复登录
 avatarthu web                     # 打开课程、文件和产物工作台
 avatarthu edit                    # 编辑报告、局部调用 Agent、提交定稿
 avatarthu files 作业编号          # 校验冻结文件及提交目录，打印路径
-avatarthu export 作业编号         # 另行导出单层提交包到 exports/
+avatarthu export 作业编号         # 返回当前 submission.zip 路径
 avatarthu status                  # 服务、登录、作业和审阅入口
 avatarthu service stop            # 停止后台，保留数据
 avatarthu menubar status          # macOS 菜单栏状态

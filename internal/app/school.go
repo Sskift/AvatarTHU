@@ -455,7 +455,13 @@ func (s *School) courseDir(course M) string {
 	if info, err := os.Stat(legacy); err == nil && info.IsDir() {
 		root = legacy
 	}
-	dir := filepath.Join(root, safeName(s.Semester), safeName(str(course, "kcm"))+"--"+fingerprint(course["wlkcid"])[:8])
+	dir := filepath.Join(root, englishName(s.Semester), "course-"+fingerprint(course["wlkcid"])[:8])
+	old := filepath.Join(root, safeName(s.Semester), safeName(str(course, "kcm"))+"--"+fingerprint(course["wlkcid"])[:8])
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if info, err := os.Stat(old); err == nil && info.IsDir() {
+			dir = old
+		}
+	}
 	mkdir(dir)
 	writeJSON(filepath.Join(dir, "course.json"), course)
 	writeFile(filepath.Join(dir, "README.md"), []byte("# "+str(course, "kcm")+"\n\n学期："+s.Semester+"\n\n- notices/：公告\n- courseware/：课件\n- homework/：题目、历次执行、产物与复审\n"), 0600)
@@ -474,6 +480,10 @@ func (s *School) courseware(cid, dir string) {
 		ext := strings.TrimLeft(str(f, "wjlx"), ".")
 		if ext != "" && !strings.HasSuffix(strings.ToLower(name), "."+strings.ToLower(ext)) {
 			name += "." + safeName(ext)
+		}
+		old := filepath.Join(dir, fingerprint(f["wjid"])[:12], name)
+		if !exists(old) {
+			name = englishName(name)
 		}
 		rel := fingerprint(f["wjid"])[:12] + "/" + name
 		path := filepath.Join(dir, filepath.FromSlash(rel))
@@ -494,18 +504,27 @@ func (s *School) assignments() []M {
 				continue
 			}
 			title, desc, attachments := s.detail(cid, hw)
-			assignment := filepath.Join(dir, "homework", safeName(title)+"--"+fingerprint(hw["xszyid"])[:8])
-			source := filepath.Join(assignment, "source")
+			assignment := filepath.Join(dir, "homework", strings.ToLower(englishName(title))+"--"+fingerprint(hw["xszyid"])[:8])
+			old := filepath.Join(dir, "homework", safeName(title)+"--"+fingerprint(hw["xszyid"])[:8])
+			if _, err := os.Stat(assignment); os.IsNotExist(err) {
+				if info, err := os.Stat(old); err == nil && info.IsDir() {
+					assignment = old
+				}
+			}
+			source := assignmentPath(assignment, "source")
 			writeFile(filepath.Join(source, "README.md"), []byte(desc), 0600)
 			seen := map[string]bool{}
 			for _, f := range attachments {
-				pair := texts(f)
+				pair := append([]string{}, texts(f)...)
+				if !exists(filepath.Join(source, pair[0])) {
+					pair[0] = englishName(pair[0])
+				}
 				ensure(!seen[pair[0]], "附件重名，需要核对："+pair[0])
 				seen[pair[0]] = true
 				s.download(pair[1], filepath.Join(source, pair[0]), fingerprint([]any{pair[1], hw["scsj"], desc}))
 			}
 			meta := M{"course_id": cid, "course": course["kcm"], "semester": s.Semester, "xszyid": hw["xszyid"], "zyid": hw["zyid"], "title": title, "deadline": strDefault(hw, "jzsjStr", "未提供"), "description": desc, "folder": source, "assignment_dir": assignment, "courseware": filepath.Join(dir, "courseware"), "requirements_hash": fingerprint([]any{desc, attachments, hw["zyfjid"], hw["scsj"]})}
-			writeJSON(filepath.Join(assignment, "assignment.json"), meta)
+			writeJSON(assignmentPath(assignment, "assignment.json"), meta)
 			found = append(found, meta)
 		}
 	}

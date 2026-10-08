@@ -35,7 +35,7 @@ var editorRequestID = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var reportMarkdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
 
 func (a *App) editorDir(st M) string {
-	return filepath.Join(strDefault(st, "assignment_dir", a.data("jobs", str(st, "task_id"))), "editor")
+	return assignmentPath(strDefault(st, "assignment_dir", a.data("jobs", str(st, "task_id"))), "editor")
 }
 func (a *App) editorDraft(st M) M {
 	path := filepath.Join(a.editorDir(st), "draft.json")
@@ -54,7 +54,7 @@ func (a *App) seedEditor(st M) M {
 	source := filepath.Join(root, "sources", "r"+fmt.Sprint(revision)+"-"+randomID(4))
 	mkdir(source)
 	var markdown string
-	existing := filepath.Join(str(st, "assignment_dir"), "report-source", fmt.Sprintf("r%d", revision))
+	existing := assignmentPath(str(st, "assignment_dir"), "report-source", fmt.Sprintf("r%d", revision))
 	candidates, _ := filepath.Glob(filepath.Join(existing, "*.md"))
 	if len(candidates) > 0 {
 		markdown = string(readBytes(candidates[0]))
