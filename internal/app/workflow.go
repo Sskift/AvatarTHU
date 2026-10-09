@@ -133,6 +133,29 @@ func validateWriter(r M, job string) M {
 	}
 	r["files"] = files
 	blockers := texts(r["blockers"])
+	// Older checkpoints have no student_inputs field. Only an explicit external
+	// input requirement pauses rewriting; ordinary blockers remain repairable.
+	if inputs, present := r["student_inputs"]; present {
+		switch inputs.(type) {
+		case []string, []any:
+		default:
+			ensure(false, "本人待补材料必须是文本列表")
+		}
+		for _, input := range texts(inputs) {
+			ensure(strings.TrimSpace(input) != "", "本人待补材料不能为空")
+			found := false
+			for _, blocker := range blockers {
+				found = found || blocker == input
+			}
+			if !found {
+				blockers = append(blockers, input)
+			}
+		}
+		if len(texts(inputs)) > 0 {
+			r["ready"] = false
+		}
+		r["blockers"] = blockers
+	}
 	ensure(!boolean(r, "ready") || len(files) > 0, "没有交付产物")
 	seen := map[string]bool{}
 	names := map[string]bool{}
@@ -317,10 +340,22 @@ func (a *App) process(st M) {
 		return
 	case "revision_ready":
 		a.rememberRevision(st)
+		feedback := ""
+		for _, entry := range objects(st["review_history"]) {
+			if number(entry, "revision", -1) == number(st, "revision", 0) {
+				feedback = ""
+				if !boolean(entry, "approved") {
+					feedback = reviewFeedback(entry)
+				}
+			}
+		}
 		st["previous_job"] = st["job"]
 		st["revision"] = number(st, "revision", 0) + 1
 		for _, k := range []string{"job", "review_attempt", "execution_plan", "review_round", "review_feedback", "review_outcome"} {
 			delete(st, k)
+		}
+		if feedback != "" {
+			st["review_feedback"] = feedback
 		}
 		st["status"] = "queued"
 	}
@@ -357,13 +392,17 @@ func (a *App) process(st M) {
 		if boolean(decision, "approved") {
 			break
 		}
+		st["review_feedback"] = reviewFeedback(decision)
+		if len(texts(result["student_inputs"])) > 0 {
+			break
+		}
 		maximum := number(plan, "max_review_rounds", 3)
 		if maximum > 0 && number(st, "review_round", 1) >= maximum {
 			result["ready"] = false
 			result["blockers"] = append(texts(result["blockers"]), fmt.Sprintf("第 %d 轮独立复审仍未通过，请查看文档末尾的意见后提出修改要求", number(st, "review_round", 1)))
 			break
 		}
-		merge(st, M{"previous_job": job, "review_round": number(st, "review_round", 1) + 1, "review_feedback": reviewFeedback(decision), "status": "rewriting"})
+		merge(st, M{"previous_job": job, "review_round": number(st, "review_round", 1) + 1, "status": "rewriting"})
 		delete(st, "job")
 		delete(st, "review_attempt")
 		a.saveTask(st)
@@ -430,6 +469,7 @@ func (a *App) snapshot(st, r M, job string) {
 	}
 	next := M{}
 	merge(next, st)
+	next["student_inputs"] = texts(r["student_inputs"])
 	merge(next, M{"output_dir": target, "ready": r["ready"], "summary": r["summary"], "blockers": r["blockers"], "artifacts": artifacts, "report": report, "report_sha256": digest(report), "presentation": obj(r, "presentation"), "submission": submission, "sha256": hash, "nonce": randomID(16), "deliveries": M{}, "review_doc": review, "links_synced": false, "links_retry_at": nil, "status": "delivery_pending"})
 	for _, k := range []string{"card_message_id", "chat_id", "local_review", "delivery_mode"} {
 		delete(next, k)

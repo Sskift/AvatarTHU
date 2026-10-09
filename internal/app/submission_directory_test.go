@@ -420,6 +420,9 @@ func TestFilesAndStatusCommandsPrintSubmissionDirectoryWithoutChangingTask(t *te
 	a, st := submissionDirectoryLegacyTask(t)
 	t.Setenv("AVATARTHU_HOME", a.Root)
 	tid := str(st, "task_id")
+	st["status"] = "needs_student"
+	st["blockers"] = []string{"缺少本人采集的原始录音和设备间距"}
+	a.saveTask(st)
 	before := readBytes(a.taskPath(tid))
 	folder := filepath.Join(str(st, "output_dir"), "submission")
 	for _, args := range [][]string{{"files", tid}, {"status"}} {
@@ -440,6 +443,9 @@ func TestFilesAndStatusCommandsPrintSubmissionDirectoryWithoutChangingTask(t *te
 		}
 		if code != 0 || !strings.Contains(string(output), want) {
 			t.Fatalf("%s command: code %d, output %q", args[0], code, output)
+		}
+		if args[0] == "status" && !strings.Contains(string(output), "待补充：缺少本人采集的原始录音和设备间距") {
+			t.Fatalf("status did not explain missing student input: %s", output)
 		}
 		if !bytes.Equal(before, readBytes(a.taskPath(tid))) {
 			t.Fatalf("%s command changed the task or current-version card", args[0])

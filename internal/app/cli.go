@@ -342,6 +342,11 @@ func (a *App) status() {
 		if str(st, "error") != "" {
 			fmt.Println("  " + safeError(str(st, "error")))
 		}
+		if str(st, "status") == "needs_student" {
+			for _, blocker := range texts(st["blockers"]) {
+				fmt.Println("  待补充：" + safeError(blocker))
+			}
+		}
 		if url := str(obj(st, "review_doc"), "url"); url != "" {
 			fmt.Println("  云文档：" + url)
 		}
