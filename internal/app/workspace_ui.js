@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id), esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const phaseNames={awaiting:'待你审阅',needs_student:'需要修改',revision_ready:'已排队',queued:'已排队',working:'正在撰写',rewriting:'按意见修改中',reviewing:'独立复审中',delivery_pending:'发布产物中',failed:'处理遇到问题',submitted:'已提交学堂',approval_invalid:'需要重新确认',closed_remote:'学堂作业已关闭',submission_unknown:'提交结果待确认'};
+const phaseNames={awaiting:'待你审阅',needs_student:'需要修改',revision_ready:'已排队',queued:'已排队',working:'正在撰写',rewriting:'按意见修改中',reviewing:'独立复审中',delivery_pending:'发布产物中',failed:'处理遇到问题',submitted:'已提交学堂',approval_invalid:'需要重新确认',ignored:'已忽略',closed_remote:'学堂作业已关闭',submission_unknown:'提交结果待确认'};
 const kinds={courseware:'课件 / 补充资料',assignment:'作业附件',notice:'公告',artifact:'产物',source:'报告源文件'};
 const harness=name=>name==='claude'?'Claude':name==='codex'?'Codex':'待配置';
 let overview={courses:[],tasks:[],health:{}}, files=[], listed=[], currentView='overview',currentID='',courseTab='tasks',renderID=0,previewID=0,ready=false,polling=false,uploadCourse='',fileAction=null,toastTimer;

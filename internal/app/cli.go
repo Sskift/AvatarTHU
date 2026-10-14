@@ -65,6 +65,14 @@ func Main(args []string) (code int) {
 		a.configure(args[1:])
 	case "status":
 		a.status()
+	case "ignore":
+		ensure(len(args) >= 2, "用法：avatarthu ignore 作业编号 [--reason 原因]")
+		f := flag.NewFlagSet("ignore", flag.ContinueOnError)
+		reason := f.String("reason", "本人确认无需提交", "忽略原因")
+		check(f.Parse(args[2:]))
+		ensure(f.NArg() == 0, "用法：avatarthu ignore 作业编号 [--reason 原因]")
+		a.ignoreTask(args[1], *reason)
+		fmt.Println("已忽略这份作业，后续同步不会重新排队；历史产物和记录保留。")
 	case "files":
 		ensure(len(args) == 2, "用法：avatarthu files 作业编号")
 		fmt.Println(a.submissionFolder(args[1]))
@@ -339,6 +347,10 @@ func (a *App) status() {
 	}
 	for _, st := range a.tasks() {
 		fmt.Printf("\n%s · %s · r%d · %s\n", str(st, "task_id"), str(st, "title"), number(st, "revision", 1), str(st, "status"))
+		if str(st, "status") == "ignored" {
+			fmt.Println("  已忽略：" + str(st, "ignored_reason"))
+			continue
+		}
 		if str(st, "error") != "" {
 			fmt.Println("  " + safeError(str(st, "error")))
 		}
@@ -390,6 +402,7 @@ avatarthu doctor                           检查两种执行器的安装和登�
 avatarthu retry --tool claude|codex        恢复该工具的失败作业，不触发提交
 avatarthu tools                            查看外部工具安装方式
 avatarthu status                           查看作业、审阅文档和服务状态
+avatarthu ignore 作业编号 [--reason 原因]    忽略无需提交的作业，保留历史记录
 avatarthu daemon                           前台运行同一个后台循环
 avatarthu uninstall                        停用服务，保留全部数据`)
 }

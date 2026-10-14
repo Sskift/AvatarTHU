@@ -48,26 +48,7 @@ func (a *App) syncCourses() {
 			}
 		}
 		active[tid] = true
-		func() {
-			defer a.lock(tid, true)()
-			st := readMap(a.taskPath(tid))
-			hash := materialsHash(meta)
-			if len(st) == 0 {
-				merge(st, meta)
-				merge(st, M{"task_id": tid, "status": "queued", "revision": 1, "source_hash": hash})
-			} else {
-				switch str(st, "status") {
-				case "submitted", "submitting", "submission_unknown":
-				default:
-					if str(st, "source_hash") != hash || boolean(st, "source_cached") {
-						merge(st, M{"status": "revision_ready", "feedback": "课程材料或输入资料有更新，请重新核对"})
-					}
-					merge(st, meta)
-					merge(st, M{"source_hash": hash, "source_cached": false})
-				}
-			}
-			a.saveTask(st)
-		}()
+		a.syncAssignment(tid, meta)
 	}
 	for _, old := range a.tasks() {
 		tid := str(old, "task_id")
@@ -86,6 +67,26 @@ func (a *App) syncCourses() {
 	}
 	writeJSON(a.data("sync-result.json"), M{"time": stamp(), "pending": len(pending), "notices_sent": notices})
 	fmt.Printf("同步完成：%d 项待交作业，%d 条新公告\n", len(pending), notices)
+}
+func (a *App) syncAssignment(tid string, meta M) {
+	defer a.lock(tid, true)()
+	st := readMap(a.taskPath(tid))
+	hash := materialsHash(meta)
+	if len(st) == 0 {
+		merge(st, meta)
+		merge(st, M{"task_id": tid, "status": "queued", "revision": 1, "source_hash": hash})
+	} else {
+		switch str(st, "status") {
+		case "submitted", "submitting", "submission_unknown", "ignored":
+		default:
+			if str(st, "source_hash") != hash || boolean(st, "source_cached") {
+				merge(st, M{"status": "revision_ready", "feedback": "课程材料或输入资料有更新，请重新核对"})
+			}
+			merge(st, meta)
+			merge(st, M{"source_hash": hash, "source_cached": false})
+		}
+	}
+	a.saveTask(st)
 }
 func (a *App) run(tick, syncOnly bool, selected string) bool {
 	defer a.lock("daily", false)()

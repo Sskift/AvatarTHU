@@ -336,7 +336,7 @@ func (a *App) process(st M) {
 	case "delivery_pending":
 		a.deliver(st)
 		return
-	case "awaiting", "needs_student", "submitted", "submission_unknown", "submitting", "closed_remote", "approval_invalid":
+	case "awaiting", "needs_student", "submitted", "submission_unknown", "submitting", "closed_remote", "approval_invalid", "ignored":
 		return
 	case "revision_ready":
 		a.rememberRevision(st)

@@ -5,7 +5,7 @@ let multiple = false, selectedBlocks = new Set(), selectionAnchor = -1;
 let taskID = '', view, markdown = '', blocks = [], activeBlock = -1, chosen = null, mode = 'paper';
 let dirty = false, saveTimer, renderTimer, rendering = 0, savePromise = null, conflict = false, submitting = false;
 let submitID = '', rewriteID = '', pollBusy = false, lastReady = '', pollError = '';
-const phaseNames = {awaiting:'待你审阅',needs_student:'需要修改',revision_ready:'已排队',queued:'已排队',working:'更新产物中',rewriting:'按复审意见修改中',reviewing:'独立复审中',delivery_pending:'发布产物中',failed:'处理遇到问题',submitted:'已提交学堂',approval_invalid:'需要重新确认',closed_remote:'课程作业已关闭',submission_unknown:'提交结果待确认'};
+const phaseNames = {awaiting:'待你审阅',needs_student:'需要修改',revision_ready:'已排队',queued:'已排队',working:'更新产物中',rewriting:'按复审意见修改中',reviewing:'独立复审中',delivery_pending:'发布产物中',failed:'处理遇到问题',submitted:'已提交学堂',approval_invalid:'需要重新确认',ignored:'已忽略',closed_remote:'课程作业已关闭',submission_unknown:'提交结果待确认'};
 const escape = text => String(text ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const requestID = () => crypto.randomUUID().replaceAll('-','');
 function error(message) { $('error').textContent = message; $('error').hidden = !message; }
