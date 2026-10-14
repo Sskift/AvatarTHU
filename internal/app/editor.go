@@ -269,6 +269,9 @@ func (a *App) decideEditorSuggestion(st, in M) M {
 }
 func (a *App) processEditorRequests(selected string) {
 	for _, old := range a.tasks() {
+		if str(old, "status") == "ignored" {
+			continue
+		}
 		tid := str(old, "task_id")
 		if selected != "" && tid != selected {
 			continue

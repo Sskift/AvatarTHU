@@ -24,6 +24,12 @@ func TestIgnoredAssignmentSurvivesMaterialUpdatesAndRejectsOldCard(t *testing.T)
 	a.SendCard = func(M, string) M { t.Fatal("sent ignored task notification"); return nil }
 	a.Upload = func(*School, M, string) M { t.Fatal("uploaded ignored task"); return nil }
 	a.process(readMap(a.taskPath(tid)))
+	requestPath := filepath.Join(a.editorDir(st), "requests", "queued-rewrite", "request.json")
+	writeJSON(requestPath, M{"kind": "rewrite", "state": "queued"})
+	a.processEditorRequests(tid)
+	if str(readMap(requestPath), "state") != "queued" {
+		t.Fatal("processed an editor request for an ignored task")
+	}
 	if a.act(event) {
 		t.Fatal("accepted old submission card")
 	}
