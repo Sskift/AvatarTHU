@@ -185,7 +185,7 @@ func buildMenubar(stage, arch, version string) {
 	app := filepath.Join(stage, "AvatarTHU.app")
 	binary := filepath.Join(app, "Contents", "MacOS", "AvatarTHUMenuBar")
 	must(os.MkdirAll(filepath.Dir(binary), 0755))
-	cmd := exec.Command("xcrun", "swiftc", "-O", "-swift-version", "5", "-target", target, "macos/AvatarTHU/main.swift", "-o", binary)
+	cmd := exec.Command("xcrun", "swiftc", "-O", "-swift-version", "5", "-target", target, "macos/AvatarTHU/main.swift", "macos/AvatarTHU/StatusWindow.swift", "-o", binary)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	must(cmd.Run())
 	plist, err := os.ReadFile("macos/AvatarTHU/Info.plist")

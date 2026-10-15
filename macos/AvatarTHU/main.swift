@@ -288,8 +288,8 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var busyAction = false
     var lockFD: Int32 = -1
     var ownsLock = false
-    var detailWindow: NSWindow?
-    var detailText: NSTextView?
+    var detailPanel: StatusWindowController?
+    var detailWindow: NSWindow? { detailPanel?.window }
     var activeProcess: Process?
     var cliProbe: Process?
     var lastCLIProbe: Date?
@@ -412,6 +412,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
             views.view.toolTip = indicator.detail
             views.view.setAccessibilityLabel("\(title)：\(indicator.text)")
         }
+        detailPanel?.update(snapshot: snapshot)
         menuNeedsRebuild = true
         rebuildIfNeeded()
     }
@@ -659,7 +660,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         showText("审阅文档尚未生成", "请查看详细状态中的作业错误或等待当前处理完成。")
     }
-    @objc func showStatus() { execute(["status"], title: "AvatarTHU 详细状态") }
+    @objc func showStatus() { execute(["status"], title: "AvatarTHU 运行概览") }
     @objc func openEditor() { execute(["edit"], title: "报告编辑页") }
     @objc func openWorkspace() { execute(["web"], title: "AvatarTHU 工作台") }
     @objc func keepalive() { execute(["keepalive", "run"], title: "网络学堂保活") }
@@ -671,36 +672,9 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.width - 20, y: view.bounds.height), in: view)
     }
 
-    func showText(_ title: String, _ text: String) {
-        if detailWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 440), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            window.isReleasedWhenClosed = false
-            let scroll = NSScrollView(frame: window.contentView!.bounds)
-            scroll.autoresizingMask = [.width, .height]
-            scroll.hasVerticalScroller = true
-            let textView = NSTextView(frame: scroll.bounds)
-            textView.isEditable = false
-            textView.isSelectable = true
-            textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-            textView.textContainerInset = NSSize(width: 16, height: 16)
-            textView.autoresizingMask = [.width]
-            textView.textContainer?.widthTracksTextView = true
-            scroll.documentView = textView
-            window.contentView?.addSubview(scroll)
-            let accessory = NSTitlebarAccessoryViewController()
-            accessory.layoutAttribute = .right
-            let menuButton = NSButton(title: "状态菜单", target: self, action: #selector(openStatusMenu))
-            menuButton.frame = NSRect(x: 0, y: 0, width: 90, height: 26)
-            menuButton.bezelStyle = .rounded
-            accessory.view = menuButton
-            window.addTitlebarAccessoryViewController(accessory)
-            window.center()
-            detailWindow = window; detailText = textView
-        }
-        detailWindow?.title = title
-        detailText?.string = text
-        detailWindow?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    func showText(_ title: String, _ text: String, overview: Bool = false, state: DetailState = .information) {
+        if detailPanel == nil { detailPanel = StatusWindowController(owner: self) }
+        detailPanel?.show(title: title, text: text, snapshot: snapshot, overview: overview, state: state)
     }
 
     func execute(_ arguments: [String], title: String, openingText: String = "正在执行，请稍候…") {
@@ -708,7 +682,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busyAction = true
         menuNeedsRebuild = true
         rebuildIfNeeded()
-        showText(title, openingText)
+        showText(title, openingText, overview: arguments == ["status"], state: .working)
         let process = Process()
         process.executableURL = root.appendingPathComponent("bin/avatarthu")
         process.arguments = arguments
@@ -737,7 +711,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         self.menuNeedsRebuild = true
                         self.rebuildIfNeeded()
                         self.refresh()
-                        self.showText(title, (completed.terminationStatus == 0 ? "" : "操作未完成（退出码 \(completed.terminationStatus)）\n\n") + text)
+                        self.showText(title, (completed.terminationStatus == 0 ? "" : "操作未完成（退出码 \(completed.terminationStatus)）\n\n") + text, overview: arguments == ["status"], state: completed.terminationStatus == 0 ? .success : .failure)
                     }
                 }
                 try process.run()
@@ -747,7 +721,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.activeProcess = nil; self.busyAction = false
                     self.menuNeedsRebuild = true
                     self.rebuildIfNeeded()
-                    self.showText(title, "无法执行命令：\(error.localizedDescription)\n请检查 AvatarTHU 安装，或在终端运行 avatarthu status。")
+                    self.showText(title, "无法执行命令：\(error.localizedDescription)\n请检查 AvatarTHU 安装，或在终端运行 avatarthu status。", state: .failure)
                 }
             }
         }
