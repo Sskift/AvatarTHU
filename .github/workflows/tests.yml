@@ -21,6 +21,8 @@ jobs:
         run: |
           xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos12.0" macos/AvatarTHU/main.swift -o "$RUNNER_TEMP/AvatarTHUMenuBar"
           echo "AVATARTHU_MENUBAR_TEST_BINARY=$RUNNER_TEMP/AvatarTHUMenuBar" >> "$GITHUB_ENV"
+          xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos12.0" -D MENUBAR_TESTS macos/AvatarTHU/main.swift macos/AvatarTHUTests/Responsiveness.swift -o "$RUNNER_TEMP/AvatarTHUMenuBarTests"
+          echo "AVATARTHU_MENUBAR_UI_TEST_BINARY=$RUNNER_TEMP/AvatarTHUMenuBarTests" >> "$GITHUB_ENV"
       - run: go vet ./...
       - run: go test -race ./...
       - name: Build native executable

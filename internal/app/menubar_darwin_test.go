@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -8,6 +9,20 @@ import (
 	"testing"
 	"time"
 )
+
+func TestMenubarResponsiveness(t *testing.T) {
+	binary := os.Getenv("AVATARTHU_MENUBAR_UI_TEST_BINARY")
+	if binary == "" {
+		t.Skip("set AVATARTHU_MENUBAR_UI_TEST_BINARY to test AppKit menu responsiveness")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, binary, "--home", t.TempDir()).CombinedOutput()
+	if err != nil {
+		t.Fatalf("menu responsiveness failed: %v\n%s", err, out)
+	}
+	t.Log(string(out))
+}
 
 func TestMenubarBundleUpgradeAndRollback(t *testing.T) {
 	root := t.TempDir()

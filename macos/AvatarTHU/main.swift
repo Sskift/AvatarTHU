@@ -279,7 +279,8 @@ struct Snapshot {
 }
 
 final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    let root = dataRoot()
+    let root: URL
+    let loadSnapshot: (URL) -> Snapshot
     var item: NSStatusItem!
     var menu = NSMenu()
     var timer: Timer?
@@ -294,6 +295,19 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var lastCLIProbe: Date?
     var cliProbeError: String?
     var indicatorViews: [String: (dot: NSView, label: NSTextField, view: NSView)] = [:]
+    let worker = DispatchQueue(label: "com.local.avatarthu.menubar.io", qos: .utility)
+    var refreshInFlight = false
+    var refreshPending = false
+    var hasSnapshot = false
+    var menuIsOpen = false
+    var menuNeedsRebuild = true
+    var stopping = false
+
+    init(root: URL = dataRoot(), loadSnapshot: @escaping (URL) -> Snapshot = { Snapshot.load(root: $0) }) {
+        self.root = root
+        self.loadSnapshot = loadSnapshot
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let locks = root.appendingPathComponent("data/locks")
@@ -316,6 +330,7 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.button?.setAccessibilityLabel("AvatarTHU 常驻状态")
         item.button?.image = sealImage()
         item.button?.imagePosition = .imageLeading
+        rebuildIfNeeded()
         refresh()
         timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
         timer?.tolerance = 3
@@ -332,10 +347,15 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopping = true
         timer?.invalidate()
-        activeProcess?.terminate()
-        cliProbe?.terminate()
-        if ownsLock { writeHealth("stopped") }
+        // Finish queued launches and health writes before stopping. A late refresh
+        // must not overwrite the final stopped receipt or leave a child running.
+        worker.sync {
+            if activeProcess?.isRunning == true { activeProcess?.terminate() }
+            if cliProbe?.isRunning == true { cliProbe?.terminate() }
+            if ownsLock { writeHealth("stopped") }
+        }
         if lockFD >= 0 { close(lockFD) }
     }
 
@@ -348,10 +368,31 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func refresh() {
-        snapshot = Snapshot.load(root: root)
+        guard !stopping else { return }
+        guard !refreshInFlight else { refreshPending = true; return }
+        refreshInFlight = true
+        worker.async { [weak self] in
+            guard let self = self else { return }
+            let loaded = self.loadSnapshot(self.root)
+            self.writeHealth("running")
+            DispatchQueue.main.async {
+                guard !self.stopping else { return }
+                self.snapshot = loaded
+                self.hasSnapshot = true
+                self.refreshInFlight = false
+                self.checkCLIsIfNeeded()
+                self.updatePresentation()
+                if self.refreshPending {
+                    self.refreshPending = false
+                    self.refresh()
+                }
+            }
+        }
+    }
+
+    func updatePresentation() {
         snapshot.claude = snapshot.localCLI["claude"] ?? snapshot.claude
         snapshot.codex = snapshot.localCLI["codex"] ?? snapshot.codex
-        checkCLIsIfNeeded()
         if let error = cliProbeError {
             snapshot.claude = Indicator(state: "error", text: "检查未完成", detail: error)
             snapshot.codex = snapshot.claude
@@ -371,10 +412,24 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
             views.view.toolTip = indicator.detail
             views.view.setAccessibilityLabel("\(title)：\(indicator.text)")
         }
-        writeHealth("running")
+        menuNeedsRebuild = true
+        rebuildIfNeeded()
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) { refresh(); rebuild() }
+    // Opening uses the already-built menu. While tracking, update only the
+    // fixed-size indicators so refreshed rows cannot move under the pointer.
+    func menuNeedsUpdate(_ menu: NSMenu) { refresh() }
+    func menuWillOpen(_ menu: NSMenu) { menuIsOpen = true }
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsOpen = false
+        // AppKit sends the selected action after this callback returns.
+        DispatchQueue.main.async { [weak self] in self?.rebuildIfNeeded() }
+    }
+    func rebuildIfNeeded() {
+        guard !stopping, !menuIsOpen, menuNeedsRebuild else { return }
+        menuNeedsRebuild = false
+        rebuild()
+    }
 
     // Only local version/auth/help commands; never launch an inference request.
     // Cache across refreshes and app launches, and keep the menu responsive.
@@ -394,24 +449,31 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let root = self.root
         process.terminationHandler = { [weak self] completed in
+            let records = readObjects(root.appendingPathComponent("data/cli-health.json"))
+            let completedCheck = ["claude", "codex"].allSatisfy { tool in
+                guard let checked = dateValue(records.first { $0["tool"] as? String == tool }?["checked_at"]) else { return false }
+                return checked >= now.addingTimeInterval(-1)
+            }
             DispatchQueue.main.async {
-                guard let self = self else { return }
+                guard let self = self, !self.stopping else { return }
                 self.cliProbe = nil
-                let records = readObjects(self.root.appendingPathComponent("data/cli-health.json"))
-                let completedCheck = ["claude", "codex"].allSatisfy { tool in
-                    guard let checked = dateValue(records.first { $0["tool"] as? String == tool }?["checked_at"]) else { return false }
-                    return checked >= now.addingTimeInterval(-1)
-                }
                 if !completedCheck { self.cliProbeError = "检查未完成（退出码 \(completed.terminationStatus)）；可运行 avatarthu doctor 查看原因。" }
                 self.refresh()
             }
         }
-        do {
-            try process.run()
-            cliProbe = process
-        } catch {
-            cliProbeError = "无法运行 avatarthu doctor：\(error.localizedDescription)"
+        cliProbe = process
+        worker.async { [weak self] in
+            do { try process.run() }
+            catch {
+                DispatchQueue.main.async {
+                    guard let self = self, !self.stopping else { return }
+                    self.cliProbe = nil
+                    self.cliProbeError = "无法运行 avatarthu doctor：\(error.localizedDescription)"
+                    self.updatePresentation()
+                }
+            }
         }
     }
 
@@ -478,6 +540,12 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func rebuild() {
         menu.removeAllItems()
         indicatorViews.removeAll()
+        guard hasSnapshot else {
+            row("AvatarTHU")
+            row("正在读取状态…")
+            row("退出菜单栏（后台继续运行）", action: #selector(quitApp), symbol: "xmark.circle")
+            return
+        }
         let heading = row("AvatarTHU")
         heading.attributedTitle = NSAttributedString(string: "AvatarTHU", attributes: [.font: NSFont.systemFont(ofSize: 15, weight: .semibold), .foregroundColor: NSColor.labelColor])
         row(snapshot.headline + (snapshot.running ? " · PID \(snapshot.pid)" : ""))
@@ -599,7 +667,6 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func toggleService() { execute(["service", snapshot.running ? "stop" : "start"], title: snapshot.running ? "停止后台" : "启动后台") }
     @objc func quitApp() { NSApp.terminate(nil) }
     @objc func openStatusMenu() {
-        refresh(); rebuild()
         guard let view = detailWindow?.contentView else { return }
         menu.popUp(positioning: nil, at: NSPoint(x: view.bounds.width - 20, y: view.bounds.height), in: view)
     }
@@ -639,6 +706,8 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func execute(_ arguments: [String], title: String, openingText: String = "正在执行，请稍候…") {
         guard !busyAction else { return }
         busyAction = true
+        menuNeedsRebuild = true
+        rebuildIfNeeded()
         showText(title, openingText)
         let process = Process()
         process.executableURL = root.appendingPathComponent("bin/avatarthu")
@@ -649,33 +718,49 @@ final class MenuBar: NSObject, NSApplicationDelegate, NSMenuDelegate {
         process.environment = env
         // File output avoids a full pipe blocking a long authentication operation.
         let output = root.appendingPathComponent("logs/menubar-command.log")
-        do {
-            try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data().write(to: output, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
-            let handle = try FileHandle(forWritingTo: output)
-            process.standardOutput = handle; process.standardError = handle
-            process.standardInput = FileHandle.nullDevice
-            process.terminationHandler = { [weak self] completed in
-                try? handle.close()
-                let data = (try? Data(contentsOf: output)) ?? Data()
-                let text = String(decoding: data.suffix(128 * 1024), as: UTF8.self)
+        activeProcess = process
+        worker.async { [weak self] in
+            do {
+                try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data().write(to: output, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
+                let handle = try FileHandle(forWritingTo: output)
+                process.standardOutput = handle; process.standardError = handle
+                process.standardInput = FileHandle.nullDevice
+                process.terminationHandler = { [weak self] completed in
+                    try? handle.close()
+                    let data = (try? Data(contentsOf: output)) ?? Data()
+                    let text = String(decoding: data.suffix(128 * 1024), as: UTF8.self)
+                    DispatchQueue.main.async {
+                        guard let self = self, !self.stopping else { return }
+                        self.activeProcess = nil; self.busyAction = false
+                        self.menuNeedsRebuild = true
+                        self.rebuildIfNeeded()
+                        self.refresh()
+                        self.showText(title, (completed.terminationStatus == 0 ? "" : "操作未完成（退出码 \(completed.terminationStatus)）\n\n") + text)
+                    }
+                }
+                try process.run()
+            } catch {
                 DispatchQueue.main.async {
-                    guard let self = self else { return }
+                    guard let self = self, !self.stopping else { return }
                     self.activeProcess = nil; self.busyAction = false
-                    self.refresh()
-                    self.showText(title, (completed.terminationStatus == 0 ? "" : "操作未完成（退出码 \(completed.terminationStatus)）\n\n") + text)
+                    self.menuNeedsRebuild = true
+                    self.rebuildIfNeeded()
+                    self.showText(title, "无法执行命令：\(error.localizedDescription)\n请检查 AvatarTHU 安装，或在终端运行 avatarthu status。")
                 }
             }
-            try process.run()
-            activeProcess = process
-        } catch {
-            busyAction = false
-            showText(title, "无法执行命令：\(error.localizedDescription)\n请检查 AvatarTHU 安装，或在终端运行 avatarthu status。")
         }
     }
 }
 
+#if MENUBAR_TESTS
+do { try runMenuBarTests() }
+catch {
+    FileHandle.standardError.write(Data("\(error)\n".utf8))
+    exit(1)
+}
+#else
 if CommandLine.arguments.contains("--snapshot") {
     let data = try JSONSerialization.data(withJSONObject: Snapshot.load(root: dataRoot()).diagnostic, options: [.sortedKeys])
     print(String(decoding: data, as: UTF8.self))
@@ -686,3 +771,4 @@ if CommandLine.arguments.contains("--snapshot") {
     app.delegate = delegate
     app.run()
 }
+#endif
