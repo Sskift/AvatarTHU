@@ -173,7 +173,7 @@ func uploadApproved(s *School, st M, file string) M {
 	check(e)
 	_, e = io.Copy(part, f)
 	check(e)
-	for k, v := range map[string]string{"xszyid": str(st, "xszyid"), "isDeleted": "0", "zynr": "经本人飞书确认提交"} {
+	for k, v := range map[string]string{"xszyid": str(st, "xszyid"), "isDeleted": "0", "zynr": ""} {
 		check(form.WriteField(k, v))
 	}
 	check(form.Close())
