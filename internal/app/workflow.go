@@ -268,8 +268,25 @@ func reviewFeedback(entry M) string {
 	}
 	return strings.Join(parts, "\n\n")
 }
+
+func checkReviewArchive(file string) {
+	if !strings.EqualFold(filepath.Ext(file), ".zip") {
+		return
+	}
+	z, err := zip.OpenReader(file)
+	check(err)
+	defer z.Close()
+	for _, member := range z.File {
+		name := filepath.Base(strings.ReplaceAll(member.Name, "\\", "/"))
+		ensure(!strings.EqualFold(name, "review.md"), "候选压缩包包含主写自查 review.md，不能传给独立复审："+filepath.Base(file))
+	}
+}
+
 func (a *App) review(st, result M, writerJob string, plan M) M {
 	files := texts(result["files"])
+	for _, rel := range files {
+		checkReviewArchive(inside(writerJob, rel))
+	}
 	hashes := hashesFor(writerJob, files)
 	candidateHash := fingerprint(hashes)
 	if _, explicit := result["submission_files"]; explicit {

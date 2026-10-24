@@ -198,3 +198,24 @@ func TestSubmissionSelectionRequiresFreshReviewWhenSelectionChanges(t *testing.T
 		t.Fatal("changed submission selection reused a stale review")
 	}
 }
+
+func TestReviewRejectsArchivedWriterAssessment(t *testing.T) {
+	for _, member := range []string{"review.md", "checks/review.md", `checks\REVIEW.md`} {
+		t.Run(member, func(t *testing.T) {
+			a := testApp(t)
+			st := fixture(t, a)
+			job := filepath.Join(a.Root, "writer")
+			r := resultAt(job, "answer")
+			archive := filepath.Join(job, "final", "verification.zip")
+			writeFile(archive, submissionTestArchive(t, map[string][]byte{member: []byte("PRIVATE SELF ASSESSMENT")}), 0600)
+			r["files"] = append(texts(r["files"]), "final/verification.zip")
+			a.RunModel = func(string, string, string, M, string, M) M {
+				t.Fatal("reviewer launched with archived writer assessment")
+				return nil
+			}
+			expectError(t, "主写自查", func() { a.review(st, r, job, M{"writer": "codex", "reviewer": "codex"}) })
+			writeFile(archive, submissionTestArchive(t, map[string][]byte{"report.md": []byte("answer"), "data/recording.wav": []byte("audio")}), 0600)
+			checkReviewArchive(archive)
+		})
+	}
+}
