@@ -284,6 +284,9 @@ func (a *App) processEditorRequests(selected string) {
 			var r M
 			func() {
 				defer a.lock("editor-"+tid, true)()
+				if str(readMap(a.taskPath(tid)), "status") == "ignored" {
+					return
+				}
 				r = readMap(p)
 				state := str(r, "state")
 				if (state != "queued" && state != "running") || parseTime(str(r, "retry_at")).After(time.Now()) {

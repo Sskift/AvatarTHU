@@ -229,6 +229,7 @@ func (a *App) workspaceTask(id string) M {
 	ensure(len(st) > 0, "找不到这份作业")
 	result := editorTaskSummary(st)
 	merge(result, M{"description": st["description"], "deadline": st["deadline"], "summary": st["summary"], "updated_at": st["updated_at"], "reviews": []M{}, "revisions": []M{}})
+	merge(result, M{"ignored_at": st["ignored_at"], "ignored_reason": st["ignored_reason"]})
 	reviews := []M{}
 	for _, r := range objects(st["review_history"]) {
 		row := M{}
@@ -429,6 +430,15 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			}
 			result = rows
 		case r.Method == "GET" && action == "task" && len(parts) == 4:
+			result = a.workspaceTask(parts[3])
+		case r.Method == "POST" && action == "task" && len(parts) == 5 && (parts[4] == "ignore" || parts[4] == "restore"):
+			in := M{}
+			check(decodeWorkspaceJSON(w, r, &in))
+			if parts[4] == "ignore" {
+				a.ignoreTask(parts[3], strDefault(in, "reason", "本人确认无需提交"))
+			} else {
+				a.restoreTask(parts[3])
+			}
 			result = a.workspaceTask(parts[3])
 		case (action == "preview" || action == "file") && r.Method == "GET":
 			c := a.workspaceCourse(r.URL.Query().Get("course"))

@@ -73,6 +73,10 @@ func Main(args []string) (code int) {
 		ensure(f.NArg() == 0, "用法：avatarthu ignore 作业编号 [--reason 原因]")
 		a.ignoreTask(args[1], *reason)
 		fmt.Println("已忽略这份作业，后续同步不会重新排队；历史产物和记录保留。")
+	case "restore":
+		ensure(len(args) == 2, "用法：avatarthu restore 作业编号")
+		a.restoreTask(args[1])
+		fmt.Println("这份作业已恢复；材料有变化时会重新核对，历史产物和记录保留。")
 	case "files":
 		ensure(len(args) == 2, "用法：avatarthu files 作业编号")
 		fmt.Println(a.submissionFolder(args[1]))
@@ -403,6 +407,7 @@ avatarthu retry --tool claude|codex        恢复该工具的失败作业，不�
 avatarthu tools                            查看外部工具安装方式
 avatarthu status                           查看作业、审阅文档和服务状态
 avatarthu ignore 作业编号 [--reason 原因]    忽略无需提交的作业，保留历史记录
+avatarthu restore 作业编号                  恢复已忽略的作业
 avatarthu daemon                           前台运行同一个后台循环
 avatarthu uninstall                        停用服务，保留全部数据`)
 }

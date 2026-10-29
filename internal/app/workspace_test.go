@@ -35,6 +35,64 @@ func TestWorkspaceCatalogAndReviewHistory(t *testing.T) {
 		t.Fatal("browsing changed task receipts")
 	}
 }
+
+func TestWorkspaceIgnoreAndRestore(t *testing.T) {
+	a, st := editorFixture(t)
+	st["source_hash"] = materialsHash(st)
+	a.saveTask(st)
+	tid := str(st, "task_id")
+	path := "/api/workspace/task/" + tid
+	a.Upload = func(*School, M, string) M { t.Fatal("workspace uploaded a task"); return nil }
+	a.SendCard = func(M, string) M { t.Fatal("workspace sent a notification"); return nil }
+	ignored := editorResult(t, editorCall(t, a, path+"/ignore", M{"reason": "无需补交"}))
+	if str(ignored, "status") != "ignored" || str(ignored, "ignored_reason") != "无需补交" || str(ignored, "ignored_at") == "" {
+		t.Fatal(ignored)
+	}
+	if str(objects(a.workspaceOverview()["tasks"])[0], "status") != "ignored" {
+		t.Fatal("overview lost ignored task")
+	}
+	restored := editorResult(t, editorCall(t, a, path+"/restore", M{}))
+	if str(restored, "status") != "awaiting" || str(restored, "ignored_reason") != "" {
+		t.Fatal(restored)
+	}
+	unlock := a.lock(tid, false)
+	res := editorCall(t, a, path+"/ignore", M{})
+	unlock()
+	if res.Code != 409 || str(readMap(a.taskPath(tid)), "status") != "awaiting" {
+		t.Fatal("ignored a busy task", res.Code)
+	}
+	for _, status := range []string{"submitted", "submitting", "submission_unknown"} {
+		st["status"] = status
+		a.saveTask(st)
+		if res := editorCall(t, a, path+"/ignore", M{}); res.Code != 409 {
+			t.Fatal("ignored protected state", status, res.Code)
+		}
+	}
+}
+
+func TestWorkspaceTaskActionsRequireLocalSession(t *testing.T) {
+	a, st := editorFixture(t)
+	before := digest(a.taskPath(str(st, "task_id")))
+	for _, action := range []string{"ignore", "restore"} {
+		for _, origin := range []string{"", "https://untrusted.example"} {
+			req := httptest.NewRequest("POST", "http://127.0.0.1:7777/api/workspace/task/"+str(st, "task_id")+"/"+action, strings.NewReader("{}"))
+			want := http.StatusUnauthorized
+			if origin != "" {
+				req.Header.Set("Origin", origin)
+				req.AddCookie(&http.Cookie{Name: editorCookieName("127.0.0.1:7777"), Value: "secret"})
+				want = http.StatusForbidden
+			}
+			out := httptest.NewRecorder()
+			a.editorHandler("secret", "127.0.0.1:7777").ServeHTTP(out, req)
+			if out.Code != want {
+				t.Fatal(action, origin, out.Code)
+			}
+		}
+	}
+	if digest(a.taskPath(str(st, "task_id"))) != before {
+		t.Fatal("unauthorized action changed state")
+	}
+}
 func TestWorkspaceFileVisibilityAndAuthentication(t *testing.T) {
 	a, st := editorFixture(t)
 	c := a.workspaceCourses()[0]
