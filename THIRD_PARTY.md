@@ -11,7 +11,7 @@ AvatarTHU is an independent Go implementation. It does not invoke or bundle a Py
 - `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/image`: HTML, cookie domain validation, Windows process support, and image decoding, BSD-3-Clause.
 - Feishu optionally invokes the official [Lark CLI](https://github.com/larksuite/cli). Its binary/source is not bundled. An existing installation is reused, or `@larksuite/cli@1.0.96` is installed through npm into the user's data directory when Feishu is enabled.
 - Claude Code and Codex CLI remain separately installed tools with their own licenses, accounts and model settings. They are not bundled.
-- The macOS menu bar's `TsinghuaSeal.svg` comes from [Tsinghua University Logo on Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tsinghua_University_Logo.svg), attributed there to Tsinghua University and marked public domain (PD-China and PD-1996). The unused SVG pattern was removed; AppKit renders the seal as a monochrome template. The university emblem remains Tsinghua University's mark; AvatarTHU is an independent project, not an official university application.
+- The macOS menu bar's `TsinghuaSeal.svg` comes from [Tsinghua University Logo on Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tsinghua_University_Logo.svg), attributed there to Tsinghua University and marked public domain (PD-China and PD-1996). The unused SVG pattern was removed; the desktop build renders the seal as a monochrome template. The university emblem remains Tsinghua University's mark; AvatarTHU is an independent project, not an official university application.
 - Network API fields were also cross-checked against [thu-learn-lib](https://github.com/Harry-Chen/thu-learn-lib). No TypeScript implementation is bundled.
 - Card 2.0 follows the official Lark CLI documentation. Historical layout inspiration: [Feishu-card-strong](https://github.com/TWe1v3/Feishu-card-strong); no third-party card skill is executed or bundled.
 
@@ -21,6 +21,10 @@ Course materials, student data, sessions, credentials, and generated assignments
 
 ## PDF.js
 
-The local Web workspace uses Mozilla PDF.js 6.3.289 (Apache-2.0) for on-demand, single-page PDF previews. Vendored assets in `internal/app/pdfjs/` come from the `pdfjs-dist@6.3.289` npm package: https://github.com/mozilla/pdf.js/releases/tag/v6.3.289. The archive SHA-512 integrity is `ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==`. The browser reads only local assets; users do not install Node.js or an additional PDF runtime.
+The local desktop workspace uses Mozilla PDF.js 6.3.289 (Apache-2.0) for on-demand, single-page PDF previews. Vendored assets in `internal/app/pdfjs/` come from the `pdfjs-dist@6.3.289` npm package: https://github.com/mozilla/pdf.js/releases/tag/v6.3.289. The archive SHA-512 integrity is `ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==`. The browser reads only local assets; users do not install Node.js or an additional PDF runtime.
 
 The upstream license is retained in `third_party/PDF.js-LICENSE`; font, CMap, and image decoder licenses remain beside their vendored assets. Release archives include these licenses.
+
+## Electron desktop runtime
+
+The desktop App uses [Electron](https://www.electronjs.org/), distributed under the MIT license, together with Chromium and its third-party components. Desktop bundles retain Electron's `LICENSE` and `LICENSES.chromium.html`; the App's resources also include the Go dependency licenses and AutoThu's original MIT license. Electron is used for the window, menu bar and local UI transport. Course polling, keepalive, workflow state and homework submission remain in the Go backend.

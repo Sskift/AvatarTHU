@@ -14,8 +14,8 @@ jobs:
         include:
           - {os: darwin, arch: arm64, runner: macos-15}
           - {os: darwin, arch: amd64, runner: macos-15}
-          - {os: windows, arch: amd64, runner: ubuntu-latest}
-          - {os: windows, arch: arm64, runner: ubuntu-latest}
+          - {os: windows, arch: amd64, runner: windows-latest}
+          - {os: windows, arch: arm64, runner: windows-latest}
           - {os: linux, arch: amd64, runner: ubuntu-latest}
           - {os: linux, arch: arm64, runner: ubuntu-latest}
     steps:
@@ -24,11 +24,17 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --prefix desktop --no-audit --no-fund
       - name: Build binary and licenses
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.2.0-alpha.8"; fi
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then version="0.3.0-alpha.1"; fi
           go run ./cmd/release --os '${{ matrix.os }}' --arch '${{ matrix.arch }}' --version "$version" --out dist
       - uses: actions/upload-artifact@v4
         with:
@@ -49,4 +55,4 @@ jobs:
         shell: bash
         run: |
           cat dist/*.sha256 > dist/SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "AvatarTHU $GITHUB_REF_NAME · Go native" --prerelease --notes 'Native Go executable. No Python, pip, venv or Go runtime installation required. Extract the binary and run init; see README for authentication and optional tools.'
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "AvatarTHU $GITHUB_REF_NAME · Desktop" --prerelease --notes 'Electron desktop App with an independent native Go backend. Extract the complete archive and run init; keep the App alongside the CLI. No separate Python, Node.js or Go runtime installation required. See README for authentication and optional tools.'

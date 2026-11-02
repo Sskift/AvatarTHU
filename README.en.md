@@ -4,7 +4,7 @@
 
 A local assistant that connects Tsinghua Web Learning course materials, assignment work, and your final review.
 
-**Built as a native Go application.** The core is a single executable: no Python, pip, virtual environment, Go, or Java runtime to install. macOS archives also include a native menu bar monitor. The scheduler and optional monitor stay in the background, and the writer and reviewer CLIs start when work is available. Feishu is optional; downloading materials, preparing assignments, and reviewing them locally also work without it.
+**Native Go backend with an Electron desktop App.** The workspace, report editor and menu bar share one App. Polling, keepalive and assignment execution stay in the independent Go service. Desktop runtime components are included; users do not install Python, Node.js or Go.
 
 [Download a release](https://github.com/Sskift/AvatarTHU/releases) · [Report an issue](https://github.com/Sskift/AvatarTHU/issues) · [Attribution and licenses](THIRD_PARTY.md)
 
@@ -71,7 +71,7 @@ Use `uname -m` on macOS / Linux, or check **Settings → System → About** on W
 
 ### 2. Install the command without starting the service
 
-Keep `AvatarTHU.app` beside `avatarthu` in the extracted macOS archive. Initialization installs this menu bar component too (macOS 12 or later). Users do not need Swift, Xcode, or an additional runtime.
+Keep `AvatarTHU.app` beside `avatarthu` in the extracted macOS archive. Initialization installs the desktop workspace and menu bar together. On Windows/Linux, retain the `AvatarTHU/` directory. Users do not install a separate desktop runtime.
 
 Open a terminal in the extracted directory. On macOS / Linux:
 
@@ -234,27 +234,15 @@ avatarthu keepalive status
 
 <a id="macos-menubar"></a>
 
-## macOS menu bar monitor
+## Desktop App and menu bar
 
-macOS archives include a native AppKit menu bar app. Once initialization installs it, `avatarthu service start` displays a **miniature university seal** that adapts to light and dark menu bars. The number next to it counts assignments awaiting review. There is no status dot in the menu bar, Dock icon, or need for an open terminal.
+AvatarTHU uses a native Go backend and an Electron desktop App. Keep `AvatarTHU.app` (macOS) or the `AvatarTHU/` directory (Windows/Linux) alongside the CLI when running `init --no-login --no-start`. The complete distribution includes the desktop runtime; users do not install Node.js, Python or Go.
 
-<img src="docs/images/menubar.png" alt="AvatarTHU macOS menu: four service indicators, keepalive and course polling schedule, assignment review, and daemon controls" width="360">
+Run `avatarthu app` or click the menu bar seal to open the workspace directly. On macOS, right-click the seal for task and settings shortcuts. Tasks, courses, files, previews and the report editor share one window. A second instance activates that window. There is no separate status window or browser handoff.
 
-1. **Check status:** the menu shows the writer/reviewer pairing and separate indicators for **Lark CLI, Learn (Web Learning), Claude, and Codex**. Green means local checks passed, blue means writing or reviewing, red means a local or recent execution error, orange means pending or stale status, and gray means disabled or stopped connections. If the pairing changes during a task, the active version's pairing and the setting for future versions appear separately.
-2. **Open deliverables:** use “打开审阅文档” (Open review document) to open an existing cloud document or local review page. Course folders, logs, and a detailed status window are also available.
-3. **Resolve issues:** start or stop the daemon, check keepalive immediately, or sign in to Web Learning again. The monitor has no submission action; submission still requires your confirmation on the current revision's card.
-4. **Control it separately:** quitting the menu bar app leaves the daemon running and the monitor returns at the next system login. `service stop` stops the course loop while leaving the monitor visible with a stopped status.
-5. **Recover execution:** a failed model request adds error details and a “检查并恢复” (Check and resume) action for that tool. Successful local authentication checks do not hide execution failures. Recovery rechecks the selected tool and queues failed work; only a successful execution clears the error.
+The renderer uses `avatarthu://workspace`; only the Electron main process can authenticate to the loopback Go backend. School sign-in and explicitly selected external Feishu links use the system browser. Closing a window hides it; quitting the App leaves the Go scheduler running. Menu bar startup and backend service startup remain independent. Windows login startup is managed by the App.
 
-```sh
-avatarthu menubar start           # Show the monitor and enable it at login
-avatarthu menubar status          # Check installation and process status
-avatarthu menubar stop            # Disable the monitor and its autostart; keep the daemon
-```
-
-The monitor reads local state every 15 seconds and refreshes when opened. Local Claude/Codex version, authentication, and command compatibility checks run at most once every 5 minutes; “刷新状态与 CLI 检查” refreshes them immediately. Hover over an indicator for details. Green confirms local checks passed; quota and network availability are determined during actual assignment execution. The monitor sends no model requests and does not separately poll the school. It verifies that the daemon PID belongs to the expected executable. Keepalive records older than 15 minutes and CLI checks older than 10 minutes show as pending refresh. Course polling and 10-minute keepalive still run in the same Go process.
-
-To upgrade, download the complete macOS archive, run `./avatarthu init --no-login --no-start` from the extracted directory, then `avatarthu menubar start`. Existing courses, accounts, and assignments are preserved. A CLI built with only `go build ./cmd/avatarthu` does not contain the monitor. Build a complete macOS archive on a Mac with `go run ./cmd/release --os darwin --arch arm64 --out dist`, or use `--arch amd64` for Intel. Only developers building the monitor need Xcode Command Line Tools.
+The settings view includes service controls, CLI health checks, school login, keepalive checks and failed-task recovery. `avatarthu menubar start|stop|status` remains supported. `avatarthu web` is a compatibility alias for opening the App; `avatarthu edit ID` opens its report editor. `--no-open` remains only for compatibility and diagnostics.
 
 ## Choose writer and reviewer harnesses
 
@@ -273,7 +261,7 @@ avatarthu configure --reviewer claude
 avatarthu configure --max-review-rounds 3
 ```
 
-All four combinations are supported. The macOS menu provides separate writer and reviewer selectors. Changes apply to the next assignment revision; an active revision and interrupted work keep their saved roles. Legacy `--mode claude-codex` / `--mode codex-claude` commands and configuration remain supported. A CLI unused by the current selection and active revisions appears gray and does not block execution.
+All four combinations are supported. The App settings provide separate writer and reviewer selectors. Changes apply to the next assignment revision; an active revision and interrupted work keep their saved roles. Legacy `--mode claude-codex` / `--mode codex-claude` commands and configuration remain supported. A CLI unused by the current selection and active revisions does not block execution.
 
 Each stage starts a fresh process, session, and working directory. Each CLI uses its own default model configuration. AvatarTHU does not select, compare, or constrain the configured models.
 
@@ -312,9 +300,9 @@ Feishu login reuses a valid local Lark CLI session. If none is configured, it gu
 7. From revision 2 onward, a **Changes in this revision** section appears near the beginning: responses to feedback, unresolved items, links to the previous review and deliverables, and actual file changes. Text, code, and ZIP members support line comparisons; PDF and Office files remain available side by side. Responses are labeled as writer notes and are not passed to the independent reviewer. Missing or changed historical files are reported instead of inventing differences.
 
 Local-only mode creates an HTML review page with the same sections. Run `avatarthu status` to find its path, and submit manually through the school website. Enabling Feishu later can publish an existing revision as a document and card without redoing the assignment.
-## Web workspace
+## Desktop workspace
 
-Run `avatarthu web`, or choose **打开工作台…** from the macOS menu bar. The UI is embedded in the native Go binary and shares the existing course polling and keepalive process. No frontend runtime or extra server is required.
+Run `avatarthu app` or click the menu bar seal. The App connects internally to the Go backend and preserves the existing local course and file storage.
 
 1. **Overview:** Courses, work awaiting your review, processing progress, and connection status for Learn, Feishu, Claude, and Codex.
 2. **Courses:** Browse by semester and course, with separate views for assignments, materials, announcements, and outputs. Upload supplementary materials to the course's `courseware/user/` folder; subsequent scans detect material changes.
@@ -322,14 +310,14 @@ Run `avatarthu web`, or choose **打开工作台…** from the macOS menu bar. T
 4. **Deliverables:** Browse current and historical artifacts alongside every independent review. Open the report editor for direct edits, multi-paragraph feedback, and final-manuscript handoff to update related artifacts. School submission still requires confirmation on the current Feishu card.
 5. **Settings and status:** Select writer and reviewer independently, adjust course polling, or queue an immediate scan. Existing work retains its execution plan, and keepalive stays at 10-minute intervals.
 
-The workspace and report editor share a persistent local address. Get the complete bookmark with `avatarthu web --no-open`; daemon restarts keep it valid, including old report bookmarks. It listens only on `127.0.0.1`, so the link is for this computer; Feishu remains the cross-device entry point. Start the daemon first with `avatarthu service start`.
+The App starts the installed backend and reconnects after restarts. Existing local bookmarks remain compatible, but normal access is through the App or menu bar. Feishu remains the cross-device entry point.
 
 
 ## Edit a report and hand off the final manuscript
 
-Run `avatarthu edit` (or `avatarthu edit TASK_ID`), or choose **编辑报告…** in the macOS menu bar. The local browser editor is served by the existing Go daemon, without another runtime or resident process. Start the daemon first with `avatarthu service start`. After upgrading an already-running daemon, stop and start it once to load the editor.
+Run `avatarthu edit` (or `avatarthu edit TASK_ID`), or open the editor from an assignment in the App. The editor and workspace share one window. The Go backend handles draft storage and Agent actions, preserving the existing writer, reviewer and submission rules.
 
-The editor keeps the same local port and access token after its first launch, including daemon restarts, upgrades, and computer reboots. Bookmark the complete link. Open pages reconnect when the daemon returns. If another program occupies the port, the editor reports the conflict and retries without changing the address; course polling and keepalive continue.
+The editor reconnects when the backend returns. Existing local editor links and drafts remain compatible; normal use requires no copied address or access token. If another program occupies the backend port, the App reports the connection problem while course polling and keepalive continue independently.
 
 1. **Edit directly.** Click a paragraph in the HTML preview and edit its text in the side panel. Changes save automatically. The Markdown tab supports precise source edits, and Changes shows the original alongside your draft. Download the Markdown alone or with its screenshots.
 2. **Ask for a scoped rewrite.** Select one paragraph or choose **多段选择** to pick several, including nonadjacent paragraphs. Shift selects a range; ⌘ / Ctrl toggles paragraphs; dragging across text selects the touched paragraphs. The side panel lists the full selection. One instruction sends them together to the configured writer in a fresh CLI session with its default model. Adjacent paragraphs can be rewritten together; separate passages receive separate before/after suggestions, preserving unselected content. For precise selections, use the paragraph field or Markdown tab. Choose **采用全部修改** to apply all proposed replacements or keep the original. If a selected passage has changed meanwhile, the editor preserves your draft and asks you to select again.
@@ -348,7 +336,7 @@ Submission packages use one archive layer. The writer explicitly selects the min
 
 ## Execution errors and recovery
 
-The menu bar and `avatarthu status` show the reason for a failed Feishu connection, consecutive failures, and the next retry time. App connection conflicts, authorization, permissions, and CLI version errors retry every 15 minutes. Temporary disconnections back off through 1, 2, 4, 8, and 15 minutes. Open “飞书连接异常详情” for details, then choose “重连飞书” or run `avatarthu reconnect lark` after resolving the cause. The error remains visible until the listener actually becomes ready.
+The App settings and `avatarthu status` show the reason for a failed Feishu connection, consecutive failures, and the next retry time. App connection conflicts, authorization, permissions, and CLI version errors retry every 15 minutes. Temporary disconnections back off through 1, 2, 4, 8, and 15 minutes. Choose “重连飞书” in settings or run `avatarthu reconnect lark` after resolving the cause. The error remains visible until the listener actually becomes ready.
 
 If another program or device already listens on the same Feishu app, stop that listener or select a Lark CLI profile for a different app:
 
@@ -361,7 +349,7 @@ Use an existing profile name; app secrets stay in Lark CLI's credential storage.
 
 The daemon writes a local heartbeat every 15 seconds. A heartbeat older than 90 seconds or an overdue scheduler stage produces an alert. Model stages use their configured timeout so normal long writing or review runs are not mistaken for a stalled scheduler. Alerts do not automatically restart the daemon or retry homework submissions. School keepalive remains every 10 minutes in the same Go process.
 
-Authentication, quota/rate limits, incompatible CLI versions, permissions, and default configuration errors pause automatic retries for the affected tool. Temporary network errors and timeouts retry after 15 minutes. After fixing the account or environment, choose “检查并恢复” (Check and resume) in the menu, or run:
+Authentication, quota/rate limits, incompatible CLI versions, permissions, and default configuration errors pause automatic retries for the affected tool. Temporary network errors and timeouts retry after 15 minutes. After fixing the account or environment, choose “恢复 Codex 任务” or “恢复 Claude 任务” in App settings, or run:
 
 ```sh
 avatarthu retry --tool claude
@@ -377,7 +365,7 @@ The common entry point is `~/.avatarthu`, or `%USERPROFILE%\.avatarthu` on Windo
 ```text
 ~/.avatarthu/
 ├── bin/avatarthu                  # Native executable
-├── apps/AvatarTHU.app             # Optional native macOS menu bar monitor
+├── apps/AvatarTHU.app             # Electron desktop workspace and menu bar
 ├── config.json                   # Roles, polling interval, CLI paths
 ├── session.json                  # Owner's Web Learning session
 ├── browser-profile/              # Dedicated browser login profile
@@ -405,7 +393,7 @@ avatarthu run                     # Scan and process now
 avatarthu run --sync-only         # Only sync, download, and deliver announcements
 avatarthu run --task TASK_ID      # Sync, then process only the specified assignment
 avatarthu keepalive run           # Keep alive now and attempt session recovery
-avatarthu web                     # Open the course, file, and deliverable workspace
+avatarthu app                     # Open the desktop workspace
 avatarthu edit                    # Edit reports and hand off a final manuscript
 avatarthu files TASK_ID           # Verify frozen files and submission contents; show paths
 avatarthu export TASK_ID          # Print the current submission.zip path
@@ -417,7 +405,10 @@ avatarthu uninstall               # Disable the daemon and monitor; preserve dat
 
 ## Development and distribution
 
-Only developers need Go 1.27.1. The core executable is built with `CGO_ENABLED=0` and does not need additional dynamic libraries or an interpreter. The menu bar app uses system AppKit; macOS releases compile Swift on a Mac and include the application bundle. Users do not need developer tools.
+Developer desktop builds require Node.js 22.12+ in addition to Go. Run `npm ci --prefix desktop`, `npm test --prefix desktop`, and `npm run test:app --prefix desktop`. `go run ./cmd/release` builds the complete distribution; `--cli-only` builds just the Go executable. The legacy Swift monitor source is retained for historical reference and is not included in new releases.
+
+
+Developers use Go 1.27.1 and Node.js 22.12+. The backend is built with `CGO_ENABLED=0`. Complete releases include the Electron App, Go backend, and third-party licenses; end users do not need developer tools.
 
 ```sh
 go test ./...

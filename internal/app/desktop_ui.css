@@ -1,0 +1,78 @@
+html[data-desktop]{--purple:#76558d;--pale:#eee8f2;--line:#e8e5e9;--bg:#faf9f7;--ink:#322c38;--muted:#89828e;background:var(--bg);font-size:13px;-webkit-font-smoothing:antialiased}
+html[data-desktop] body{overscroll-behavior:none}
+.desktop-titlebar{display:none}
+html[data-desktop] .desktop-titlebar{display:block;position:fixed;left:0;right:0;top:0;height:52px;-webkit-app-region:drag;z-index:20;pointer-events:none}
+html[data-desktop] .sidebar{width:232px;padding:72px 17px 23px;background:#f0edf1;border-right:1px solid #e5e0e7}
+html[data-desktop] .brand{margin:0 11px 38px;gap:12px;font-size:19px;letter-spacing:-.5px;color:#45374d}
+html[data-desktop] .brand small{font-size:10px;letter-spacing:1px;margin-top:3px;color:#998d9f}
+html[data-desktop] .seal{border:0;outline:0;width:37px;height:37px;flex:none}
+html[data-desktop] .seal img{width:100%;height:100%;opacity:.7}
+html[data-desktop] .sidebar nav{gap:4px}
+html[data-desktop] .sidebar nav a{display:flex;align-items:center;gap:12px;padding:10px 13px;font-size:13px;border-radius:8px;color:#827589;font-weight:500}
+html[data-desktop] .sidebar nav a span{display:flex;width:19px;height:19px;color:inherit}
+html[data-desktop] .sidebar nav a svg{width:19px;height:19px}
+html[data-desktop] .sidebar nav a.active{background:#fff9;box-shadow:0 1px 3px #40304b06;color:#654579;font-weight:600}
+html[data-desktop] .sidebar nav a:hover{background:#ffffff60}
+html[data-desktop] .sidebar-foot{font-size:11px;padding:20px 12px 0;line-height:1.8}
+html[data-desktop] .sidebar-foot small{font-size:10px;color:#a097a6}
+html[data-desktop] .shell{margin-left:232px;padding:68px 40px 28px;max-width:1680px}
+html[data-desktop] .topbar{margin-bottom:28px}
+html[data-desktop] .eyebrow{font-size:9px;letter-spacing:1.7px;color:#a295aa}
+html[data-desktop] h1{font-size:26px;margin-top:6px;font-weight:600;letter-spacing:-.5px}
+html[data-desktop] h2{font-size:15px;font-weight:600}
+html[data-desktop] h3{font-weight:550}
+html[data-desktop] button,html[data-desktop] .button{font-size:12px;padding:7px 12px;border-radius:7px}
+html[data-desktop] button.primary,html[data-desktop] .button.primary{background:#79588c;border-color:#79588c;box-shadow:0 1px 2px #402b5012}
+html[data-desktop] .top-actions{gap:8px}
+html[data-desktop] .hero{background:transparent;padding:0 0 22px;border:0;border-radius:0;border-bottom:1px solid var(--line)}
+html[data-desktop] .hero h2{font-size:19px;color:#4e4057;font-weight:550;letter-spacing:-.3px}
+html[data-desktop] .hero p{font-size:12px;color:#9b909f;margin-top:7px}
+html[data-desktop] .hero-number{font:12px/1.7 -apple-system,sans-serif;color:#a398a8;max-width:100px;text-align:right}
+html[data-desktop] .metrics{gap:0;margin:0 0 28px;padding:22px 0 4px}
+html[data-desktop] .metric{border:0;background:transparent;border-radius:0;padding:0 24px;border-right:1px solid var(--line)}
+html[data-desktop] .metric:first-child{padding-left:0}
+html[data-desktop] .metric:last-child{border-right:0}
+html[data-desktop] .metric strong{font:500 28px/1.2 -apple-system,sans-serif;letter-spacing:-1px;color:#62516c;margin-bottom:6px;font-variant-numeric:tabular-nums}
+html[data-desktop] .metric span{font-size:11px;color:#9c929f}
+html[data-desktop] .section-heading{margin:26px 0 12px}
+html[data-desktop] .section-heading a{font-size:11px;color:#98849f}
+html[data-desktop] .task-list{gap:0;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff}
+html[data-desktop] .task-row{border:0;border-radius:0;border-bottom:1px solid #eeebef;padding:16px 19px;transition:background .15s}
+html[data-desktop] .task-row:last-child{border-bottom:0}
+html[data-desktop] .task-row:hover{background:#fbf8fc}
+html[data-desktop] .task-row h3{font-size:13px;margin-bottom:6px}
+html[data-desktop] .task-row small{font-size:10px;color:#9f97a4}
+html[data-desktop] .badge{font-size:10px;border-radius:5px;padding:3px 7px}
+html[data-desktop] .grid{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+html[data-desktop] .course-card{border-radius:10px;padding:18px 19px;box-shadow:0 2px 4px #24103002;transition:background .15s,border-color .15s}
+html[data-desktop] .course-card:hover{transform:none;background:#fffdfd;border-color:#d2c4d9}
+html[data-desktop] .course-icon{width:30px;height:30px;border-radius:8px;background:#eee8f3;margin-bottom:15px;font-size:17px}
+html[data-desktop] .course-card:nth-child(3n+2) .course-icon{color:#6c8679;background:#edf2ec}
+html[data-desktop] .course-card:nth-child(3n+3) .course-icon{color:#ad9270;background:#f5eee5}
+html[data-desktop] .course-card h3{font-size:14px}
+html[data-desktop] .course-card p{font-size:10px;color:#aaa0af;margin-bottom:18px}
+html[data-desktop] .course-card footer{font-size:10px;padding-top:10px;border-color:#f0ecf2;color:#9e90a6}
+html[data-desktop] .panel{border-radius:11px;padding:21px}
+html[data-desktop] .health-item p{font-size:11px;color:#a095a5}
+html[data-desktop] .health-item strong{font-size:12px}
+html[data-desktop] .meta-line{font-size:10px;color:#a99eb0}
+html[data-desktop] #footer{font-size:10px;color:#b5acbb}
+html[data-desktop] .two-column{grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr)}
+html[data-desktop] .settings{max-width:none}
+.desktop-controls{margin-top:20px}
+.desktop-controls .muted{margin:8px 0 20px;font-size:12px}
+.desktop-control-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.desktop-folder-actions{display:flex;gap:10px;margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+.desktop-command-result{white-space:pre-wrap;font-size:12px;color:var(--muted);line-height:1.8}
+html[data-desktop] body:has(.workspace)>.topbar{height:88px;padding:30px 26px 0;background:#f8f7f5}
+html[data-desktop] body:has(.workspace) .brand{margin:0;font-size:18px}
+html[data-desktop] body:has(.workspace) .brand>span{font-size:14px}
+html[data-desktop] body:has(.workspace) .brand small{font-size:10px}
+.desktop-editor-seal{width:29px;height:29px;opacity:.7}
+html[data-desktop] .workspace{grid-template-columns:200px minmax(400px,1fr) 290px}
+html[data-desktop] .workspace .navigation,html[data-desktop] .workspace .inspector{top:88px;height:calc(100vh - 88px);background:#f5f2f6}
+html[data-desktop] .workspace main{padding:30px 28px 64px}
+html[data-desktop] .workspace .paper{padding:40px;box-shadow:0 4px 20px #35234404;border-radius:5px}
+html[data-desktop] .workspace .document-heading h1{font-size:20px}
+html[data-desktop] .workspace .inspector{padding:25px 18px}
+@media(max-width:1120px){html[data-desktop] .shell{padding:68px 28px 24px}html[data-desktop] .two-column{grid-template-columns:1fr}html[data-desktop] .workspace{grid-template-columns:170px minmax(330px,1fr) 265px}html[data-desktop] .workspace main{padding:25px 20px}html[data-desktop] .workspace .paper{padding:28px}.desktop-control-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}

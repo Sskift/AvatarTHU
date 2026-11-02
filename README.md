@@ -4,7 +4,7 @@
 
 把网络学堂的课程资料、作业处理和本人审阅串起来的本地课程助手。
 
-**现在使用 Go 原生程序。** 核心是一个可执行文件，不需要安装 Python、pip、虚拟环境、Go 或 Java。macOS 发布包额外附带原生菜单栏监控。空闲时只保留调度和可选监控进程；有作业时才启动主写和复审 CLI。飞书是可选功能，不启用也可以下载材料、完成作业和本地审阅。
+**Go 后台 + Electron 桌面 App。** 工作台、报告编辑和菜单栏属于同一个 App，点击菜单栏直接打开工作台。同步、10 分钟保活和作业执行仍由独立的 Go 进程负责；关闭窗口或退出 App 不会停止后台。完整发布包已包含桌面运行组件，用户无需单独安装 Python、Node.js 或 Go。
 
 [下载最新版本](https://github.com/Sskift/AvatarTHU/releases) · [反馈问题](https://github.com/Sskift/AvatarTHU/issues) · [来源与许可证](THIRD_PARTY.md)
 
@@ -69,7 +69,7 @@ macOS / Linux 可用 `uname -m` 查看架构；Windows 可在“设置 → 系�
 
 ### 2. 安装命令，暂不启动后台
 
-macOS 发布包中的 `AvatarTHU.app` 是菜单栏组件（macOS 12 及以上），请保留在 `avatarthu` 同一目录，初始化会一起安装。不需要安装 Swift、Xcode 或额外运行环境。
+macOS 发布包中的 `AvatarTHU.app` 包含桌面工作台和菜单栏，请保留在 `avatarthu` 同一目录，初始化会一起安装。Windows/Linux 同样保留 `AvatarTHU/` 目录。用户不需要另装桌面运行环境。
 
 在解压目录打开终端。macOS / Linux：
 
@@ -232,27 +232,17 @@ avatarthu keepalive status
 
 <a id="macos-menubar"></a>
 
-## macOS 菜单栏监控
+## 桌面 App 与菜单栏
 
-macOS 发布包附带原生 AppKit 菜单栏。初始化安装组件后，`avatarthu service start` 会在右上角显示**微缩校徽**，自动适配深色和浅色菜单栏；后面的数字是待审阅作业数。顶栏不显示状态圆点，也不占用 Dock 或要求常开终端。
+完整发布包同时提供 Go 命令和 Electron App。保留解压目录中的 `AvatarTHU.app`（macOS）或 `AvatarTHU/`（Windows/Linux），运行 `./avatarthu init --no-login --no-start` 安装；已有课程、登录和作业记录保留。macOS 的 Electron Framework 链接与可执行权限在打包和安装时保持原样。
 
-<img src="docs/images/menubar.png" alt="AvatarTHU macOS 菜单栏：四项服务状态、保活与课程扫描安排、作业审阅和后台控制" width="360">
+`avatarthu app` 打开桌面工作台。macOS 左键点击菜单栏校徽显示同一个窗口，右键显示快捷菜单；待审阅数量仍显示在菜单栏。快捷菜单中的作业直达详情，设置直达 App 内的设置页面。启动第二个实例只激活已有窗口。
 
-1. **看状态：** 下拉菜单顶部显示当前主写和复审 harness，并为 **Lark CLI、Learn（网络学堂）、Claude、Codex** 各设一个指示灯。绿色表示本地检查通过，蓝色表示实际正在主写或复审，红色表示本地或最近执行异常，橙色表示等待检查、连接或记录过期，灰色表示未启用或连接已停。配置切换时，正在执行的旧分工和后续版本的新分工会分开显示。
-2. **打开产物：** 从“打开审阅文档”进入现有云文档或本地审阅页，也可以打开课程目录、日志和详细状态窗口。
-3. **处理问题：** 可以启动或停止后台、立即检查保活、重新登录网络学堂。菜单栏没有作业提交按钮，提交仍由本人在当前版本卡片中确认。
-4. **独立开关：** “退出菜单栏”只关闭监控，后台继续运行，下次登录系统时重新显示。`service stop` 则只停止课程循环，菜单栏保留并显示停止状态。
-5. **恢复执行：** 最近一次模型请求失败时，菜单显示对应工具的错误详情及“检查并恢复”入口。本地登录检查通过不会覆盖实际执行异常；手动恢复会重新检查对应 CLI，并把该工具的失败作业排队，实际执行成功后才清除异常。
+课程、附件、PDF 预览、报告编辑和产物都在 App 中查看。界面使用内部 `avatarthu://workspace` 地址，访问后台的凭证只保留在主进程中；普通工作台操作不打开外部浏览器。网络学堂登录和明确点击的飞书外部链接仍使用系统浏览器。
 
-```sh
-avatarthu menubar start           # 打开菜单栏，并启用登录时显示
-avatarthu menubar status          # 检查是否安装及运行
-avatarthu menubar stop            # 关闭菜单栏及其自启动；后台继续运行
-```
+关闭窗口会隐藏到菜单栏；退出 App 仅退出界面。课程同步和作业任务继续由 Go 后台运行。macOS 登录时可自动启动菜单栏；Windows App 维护自己的登录启动项。设置页提供后台启停、CLI 检查、网络学堂登录、保活检查和失败任务恢复。停止菜单栏和停止后台是独立操作。
 
-监控每 15 秒读取本地状态，展开菜单时立即刷新。Claude / Codex 的本地版本、登录和命令兼容性检查最多每 5 分钟执行一次，也可点击“刷新状态与 CLI 检查”立即重查；悬停指示项可以查看检查详情。绿色表示本地检查通过，实际请求的额度和网络状况仍以作业执行结果为准。监控不发送模型请求，也不另行轮询学校。它核对后台 PID 对应的可执行文件，避免把残留状态误报为运行中；保活成功记录超过 15 分钟、CLI 检查超过 10 分钟会显示“待更新”。课程扫描和每 10 分钟保活仍在同一个 Go 进程中执行。
-
-旧版用户需重新下载完整 macOS 压缩包，在解压目录运行 `./avatarthu init --no-login --no-start`，再运行 `avatarthu menubar start`；已有课程、账号与作业保留。只用 `go build ./cmd/avatarthu` 构建的 CLI 不含菜单栏；完整 macOS 发布包需在 Mac 上通过 `go run ./cmd/release --os darwin --arch arm64 --out dist` 构建，Intel 架构使用 `--arch amd64`。只有开发者构建菜单栏时需要 Xcode Command Line Tools。
+`avatarthu menubar start|stop|status` 保留兼容。旧的 `avatarthu web` 现在也打开 App；`avatarthu edit 作业编号` 直接进入 App 内的报告编辑器。`--no-open` 仅用于旧入口与诊断兼容。
 
 ## 分别选择主写与复审 harness
 
@@ -271,7 +261,7 @@ avatarthu configure --reviewer claude
 avatarthu configure --max-review-rounds 3
 ```
 
-四种组合都支持。macOS 菜单栏中可分别打开“选择主写 harness”和“选择复审 harness”进行切换。新配置从下一版作业生效，当前版本及中断恢复继续使用该版本保存的分工；旧的 `--mode claude-codex` / `--mode codex-claude` 命令和配置仍兼容。未被当前配置或运行中版本选用的 CLI 显示灰色，不阻止处理。
+四种组合都支持。在 App 设置中分别选择主写和复审。新配置从下一版作业生效，当前版本及中断恢复继续使用该版本保存的分工；旧的 `--mode claude-codex` / `--mode codex-claude` 命令和配置仍兼容。未被当前配置或运行中版本选用的 CLI 不阻止处理。
 
 每个阶段使用新进程、新会话、新工作目录；两边分别使用自己的默认模型配置。AvatarTHU 不指定、比较或约束模型。
 
@@ -314,9 +304,9 @@ avatarthu notifications on
 7. 从第二版起，文档前部显示**本版改动**：修改意见的处理说明、仍未解决的事项、上版审阅入口和产物附件，以及真实文件变化。文本、代码和 ZIP 包内文件可以逐行对照；PDF、Office 等保留前后版本文件入口。修改说明标为主写记录，独立复审者仍只收到原题与当前候选产物。缺少或已改变的历史文件会明确提示，不虚构差异。
 
 纯本地模式会生成同样分节的 HTML 审阅页，用 `avatarthu status` 查看路径；提交需本人在学校网页操作。启用飞书后可把现有版本发布为云文档与卡片，无需重做作业。
-## Web 工作台
+## App 工作台
 
-运行 `avatarthu web`，或在 macOS 菜单栏点击 **打开工作台…**。它与课程扫描、保活共用现有 Go 进程，前端随二进制内置，不需要 Node.js、Python 或额外服务。
+运行 `avatarthu app`，或点击菜单栏校徽，直接进入桌面工作台。界面通过 App 内部连接访问 Go 后台，课程与文件保持原来的本机存储位置。
 
 1. **总览：** 查看课程、待审阅作业、处理进度和网络学堂、飞书、Claude、Codex 的状态。
 2. **课程：** 按学期与课程查找作业、课件、附件和公告。上传补充资料到课程的 `courseware/user/`；后续扫描会将材料变化纳入作业处理。
@@ -324,14 +314,14 @@ avatarthu notifications on
 4. **产物：** 查看当前与历史交付，以及每次独立复审的意见；进入报告编辑页可多段提建议、直接修改正文、提交定稿并同步其他产物。正式提交仍通过当前版本的飞书卡片确认。
 5. **设置与状态：** 分别选择主写和复审 harness，设置扫描间隔，或将立即扫描加入后台队列。已有任务继续按原分工执行；保活保持每 10 分钟一次。
 
-工作台和报告编辑共用固定本机地址。用 `avatarthu web --no-open` 获取完整入口并收藏；重启后台后地址不变，旧报告书签也继续可用。页面只监听 `127.0.0.1`，链接用于这台电脑；跨设备仍使用飞书。首次未启动时先运行 `avatarthu service start`。
+App 会启动已安装的后台，并在重启后重新连接。原来的本机书签入口继续兼容；日常使用从 App 或菜单栏进入，跨设备仍使用飞书。
 
 
 ## 直接编辑报告，再把定稿交给 Agent
 
-运行 `avatarthu edit`（或 `avatarthu edit 作业编号`），也可以从 macOS 菜单栏选择 **“编辑报告…”**。编辑页由现有 Go 常驻进程提供，不新增语言运行时或常驻进程。先用 `avatarthu service start` 启动后台；升级前已启动的后台需要停止、再启动一次。
+运行 `avatarthu edit 作业编号`，或在 App 的作业详情中进入报告编辑。编辑器与工作台使用同一窗口，保存和 Agent 操作仍由 Go 后台处理；主写、复审和真实提交的约束保持不变。
 
-编辑入口首次分配后会固定保存在本机，端口和访问令牌在后台重启、升级或电脑重启后保持不变，可以收藏完整链接。已打开的页面会在后台恢复后自动重连。若端口被其他程序占用，编辑页会明确报错并等待端口释放，课程扫描和保活继续运行；不会悄悄换一个地址。
+App 内的编辑页会在后台恢复后自动重连。原有本机编辑入口和草稿继续兼容，日常使用不需要复制地址或访问令牌。若后台端口被其他程序占用，App 会显示连接异常，课程扫描和保活仍独立运行。
 
 1. **自己改字。** 点击 HTML 正文中的段落，在侧栏直接修改，预览与草稿自动保存。Markdown 页签支持精确编辑，修改对照展示原文和草稿；可以下载 Markdown 或带截图的源文件包。
 2. **定点调用 Agent。** 可选择一段，或点击“多段选择”勾选若干段落；支持不相邻段落、Shift 连选、⌘ / Ctrl 点击增减，以及拖选跨段文字。侧栏列出完整选区，写一条意见即可让同一个 Agent 一起修改。相邻段落可合并改写，不相邻片段分别展示原文与建议，未选内容保留。也可在段落输入框或 Markdown 中精确圈定文字。当前主写 harness 使用默认模型、新会话返回建议；你选择“采用全部修改”或“保留原文”后才写入草稿。若选区已被手动改动，会保留现稿并提示重新选择。
@@ -350,7 +340,7 @@ avatarthu notifications on
 
 ## 执行异常与恢复
 
-菜单栏和 `avatarthu status` 会显示飞书连接失败的原因、连续失败次数和下次重试时间。应用连接冲突、授权、权限或 CLI 版本问题每 15 分钟重试；临时断网按 1、2、4、8、15 分钟逐步延长间隔。可以点击“飞书连接异常详情”查看处理办法，修复后点“重连飞书”，或运行 `avatarthu reconnect lark`。请求重连不会提前把红灯变绿；只有监听真正就绪才清除异常。
+App 的“设置与状态”和 `avatarthu status` 会显示飞书连接失败的原因、连续失败次数和下次重试时间。应用连接冲突、授权、权限或 CLI 版本问题每 15 分钟重试；临时断网按 1、2、4、8、15 分钟逐步延长间隔。修复后可在设置中点“重连飞书”，或运行 `avatarthu reconnect lark`。请求重连不会提前把红灯变绿；只有监听真正就绪才清除异常。
 
 同一飞书应用被其他设备或程序监听时，需要停止原监听，或为 AvatarTHU 选择另一个应用的 Lark CLI profile：
 
@@ -363,7 +353,7 @@ avatarthu login lark --profile my-avatar
 
 后台每 15 秒更新本地心跳；超过 90 秒未更新，或当前调度阶段超过期限，菜单栏会提示异常。模型执行按该阶段的超时设置判断，不会把正常的长时间主写／复审当成失联。异常提示不会自动重启后台或重试作业提交。网络学堂保活仍是同一 Go 进程每 10 分钟一次。
 
-登录失效、额度或频率限制、CLI 版本不兼容、权限或默认配置问题会暂停该工具的自动重试，避免每 15 分钟重复失败。网络、超时等暂时性错误仍在 15 分钟后重试。修复账号或环境后，可从菜单栏点击“检查并恢复”，或运行：
+登录失效、额度或频率限制、CLI 版本不兼容、权限或默认配置问题会暂停该工具的自动重试，避免每 15 分钟重复失败。网络、超时等暂时性错误仍在 15 分钟后重试。修复账号或环境后，可在 App 设置中点击“恢复 Codex 任务”或“恢复 Claude 任务”，或运行：
 
 ```sh
 avatarthu retry --tool claude
@@ -379,7 +369,7 @@ avatarthu retry --tool codex
 ```text
 ~/.avatarthu/
 ├── bin/avatarthu                  # 原生可执行文件
-├── apps/AvatarTHU.app             # macOS 可选原生菜单栏
+├── apps/AvatarTHU.app             # Electron 桌面 App 与菜单栏
 ├── config.json                   # 分工、扫描频率、CLI 路径
 ├── session.json                  # 本人网络学堂会话
 ├── browser-profile/              # 本项目的浏览器登录配置
@@ -407,7 +397,7 @@ avatarthu run                     # 立即扫描并处理
 avatarthu run --sync-only         # 只同步、下载及推送公告
 avatarthu run --task 作业编号      # 同步后只处理指定作业
 avatarthu keepalive run           # 立即保活并尝试恢复登录
-avatarthu web                     # 打开课程、文件和产物工作台
+avatarthu app                     # 打开桌面工作台
 avatarthu edit                    # 编辑报告、局部调用 Agent、提交定稿
 avatarthu files 作业编号          # 校验冻结文件及提交目录，打印路径
 avatarthu export 作业编号         # 返回当前 submission.zip 路径
@@ -419,7 +409,10 @@ avatarthu uninstall               # 停用后台与菜单栏，仍保留数据
 
 ## 开发与分发
 
-仅开发者需要 Go 1.27.1。核心程序使用 `CGO_ENABLED=0` 构建，不需要额外动态库或解释器。macOS 菜单栏使用系统 AppKit，发布时在 macOS 上编译 Swift 并附带应用包；使用者无需安装开发工具。
+开发桌面版还需要 Node.js 22.12+。先运行 `npm ci --prefix desktop`，使用 `npm test --prefix desktop` 和 `npm run test:app --prefix desktop` 验证桌面交互；`go run ./cmd/release` 构建完整发布包，`--cli-only` 仅构建 Go 命令。旧 Swift 菜单栏源文件保留作历史参考，不再进入新发布包。
+
+
+开发者使用 Go 1.27.1 和 Node.js 22.12+。后台使用 `CGO_ENABLED=0` 构建；完整发布包包含 Electron App、Go 后台及第三方许可证。使用者无需安装开发工具。
 
 ```sh
 go test ./...

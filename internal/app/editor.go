@@ -13,10 +13,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,7 +26,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-//go:embed editor_ui.html editor_ui.css editor_ui.js workspace_ui.html workspace_ui.css workspace_ui.js pdfjs
+//go:embed editor_ui.html editor_ui.css editor_ui.js workspace_ui.html workspace_ui.css workspace_ui.js desktop_ui.css desktop_ui.js pdfjs
 var editorUI embed.FS
 
 var editorRequestID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -486,7 +484,7 @@ func (a *App) editorHandler(token, host string) http.Handler {
 			_, _ = w.Write(b)
 			return
 		}
-		static := map[string]string{"/": "workspace_ui.html", "/workspace.css": "workspace_ui.css", "/workspace.js": "workspace_ui.js", "/editor": "editor_ui.html", "/editor.css": "editor_ui.css", "/editor.js": "editor_ui.js"}
+		static := map[string]string{"/": "workspace_ui.html", "/workspace.css": "workspace_ui.css", "/workspace.js": "workspace_ui.js", "/editor": "editor_ui.html", "/editor.css": "editor_ui.css", "/editor.js": "editor_ui.js", "/desktop.css": "desktop_ui.css", "/desktop.js": "desktop_ui.js"}
 		if file, ok := static[r.URL.Path]; ok && r.Method == "GET" {
 			b, _ := editorUI.ReadFile(file)
 			w.Header().Set("Content-Type", map[string]string{".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}[filepath.Ext(file)])
@@ -632,6 +630,10 @@ func (a *App) openEditor(tid string, noOpen bool) {
 	a.openLocalWeb(tid, noOpen, false)
 }
 func (a *App) openLocalWeb(tid string, noOpen, workspace bool) {
+	if !noOpen {
+		a.openDesktop(tid, !workspace, "overview")
+		return
+	}
 	if tid != "" {
 		ensure(len(readMap(a.taskPath(tid))) > 0, "找不到这份作业")
 	}
@@ -652,23 +654,5 @@ func (a *App) openLocalWeb(tid string, noOpen, workspace bool) {
 	if tid != "" {
 		raw += "&task=" + tid
 	}
-	if noOpen {
-		fmt.Println(raw)
-		return
-	}
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("/usr/bin/open", raw)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", raw)
-	default:
-		cmd = exec.Command("xdg-open", raw)
-	}
-	check(cmd.Run())
-	if workspace {
-		fmt.Println("已打开 AvatarTHU 工作台。")
-	} else {
-		fmt.Println("已打开本地报告编辑页。")
-	}
+	fmt.Println(raw)
 }

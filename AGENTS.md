@@ -2,7 +2,7 @@
 
 - Develop, commit and push directly on `main`. Do not create development branches or pull requests unless the user explicitly asks.
 - Runtime and course data belong in `~/.local/share/avatarthu` on macOS, with `~/.avatarthu` as the friendly symlink. Windows uses `%USERPROFILE%\.avatarthu`. Never store runtime/course data in Git.
-- AvatarTHU is a native Go program. Do not reintroduce a Python runtime, venv, Selenium or an interpreter-bundling installer.
+- AvatarTHU uses a native Go backend and an Electron desktop App. The App owns the menu bar and workspace; open workspace and report views directly in the App. Do not reintroduce a Python runtime, venv or Selenium.
 - Keep the successful Feishu receipt durable before marking an announcement read.
 - Keep homework submissions simple: one archive layer only. One extraction exposes the report, runnable program and source files in a clear directory layout. Do not nest delivery archives or duplicate versions; preserve required relative paths, executable permissions and native document/runtime data formats. Keep editing downloads separate from the final submission layout.
 - Generate `requirements.txt` only when the assignment code introduces third-party dependencies beyond the provided materials or course environment. With no added dependencies, do not create an empty manifest or copy the original manifest into the final submission; preserve original attachments in the workspace.

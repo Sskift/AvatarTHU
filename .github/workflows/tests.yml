@@ -15,14 +15,17 @@ jobs:
         with:
           go-version: '1.27.1'
           cache: true
-      - name: Build native macOS menu bar
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos12.0" macos/AvatarTHU/main.swift macos/AvatarTHU/StatusWindow.swift -o "$RUNNER_TEMP/AvatarTHUMenuBar"
-          echo "AVATARTHU_MENUBAR_TEST_BINARY=$RUNNER_TEMP/AvatarTHUMenuBar" >> "$GITHUB_ENV"
-          xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos12.0" -D MENUBAR_TESTS macos/AvatarTHU/main.swift macos/AvatarTHU/StatusWindow.swift macos/AvatarTHUTests/Responsiveness.swift -o "$RUNNER_TEMP/AvatarTHUMenuBarTests"
-          echo "AVATARTHU_MENUBAR_UI_TEST_BINARY=$RUNNER_TEMP/AvatarTHUMenuBarTests" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci --prefix desktop --no-audit --no-fund
+      - run: npm run assets --prefix desktop
+      - run: npm test --prefix desktop
+      - name: Test desktop window and navigation
+        if: runner.os != 'Linux'
+        run: npm run test:app --prefix desktop
       - run: go vet ./...
       - run: go test -race ./...
       - name: Build native executable
@@ -52,7 +55,7 @@ jobs:
           "$RUNNER_TEMP/avatar-extract/avatarthu" init --no-login --no-start
           "$RUNNER_TEMP/avatar-extract/avatarthu" init --no-login --no-start
           codesign --verify --deep --strict "$AVATARTHU_HOME/apps/AvatarTHU.app"
-          "$AVATARTHU_HOME/apps/AvatarTHU.app/Contents/MacOS/AvatarTHUMenuBar" --home "$AVATARTHU_HOME" --snapshot
+          AVATARTHU_DESKTOP_BINARY="$AVATARTHU_HOME/apps/AvatarTHU.app/Contents/MacOS/AvatarTHU" npm run test:app --prefix desktop
       - name: Clean installation without a runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -67,3 +70,17 @@ jobs:
           & "$env:AVATARTHU_HOME/bin/avatarthu.exe" configure --reviewer codex
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (Test-Path "$env:AVATARTHU_HOME/.venv") { throw 'Unexpected runtime environment' }
+      - name: Check Windows desktop release and installation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $release = Join-Path $env:RUNNER_TEMP 'avatar-desktop-release'
+          $extract = Join-Path $env:RUNNER_TEMP 'avatar-desktop-extract'
+          go run ./cmd/release --os windows --arch amd64 --out $release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive "$release/avatarthu-windows-amd64.zip" $extract
+          $env:AVATARTHU_HOME = Join-Path $env:RUNNER_TEMP 'avatar-desktop-clean'
+          & "$extract/avatarthu.exe" init --no-login --no-start
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:AVATARTHU_DESKTOP_BINARY = "$env:AVATARTHU_HOME/apps/AvatarTHU/AvatarTHU.exe"
+          npm run test:app --prefix desktop

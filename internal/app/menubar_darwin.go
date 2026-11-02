@@ -10,8 +10,11 @@ import (
 
 const menubarLabel = "com.local.avatarthu.menubar"
 
-func (a *App) menubarApp() string { return filepath.Join(a.Root, "apps", "AvatarTHU.app") }
+func (a *App) menubarApp() string { return a.desktopApp() }
 func (a *App) menubarExecutable() string {
+	if exe := desktopExecutable(a.desktopApp()); exists(exe) {
+		return exe
+	}
 	return filepath.Join(a.menubarApp(), "Contents", "MacOS", "AvatarTHUMenuBar")
 }
 func (a *App) menubarPlist() string {
@@ -22,71 +25,38 @@ func (a *App) menubarPlist() string {
 func menubarDomain() string { return fmt.Sprintf("gui/%d/%s", os.Getuid(), menubarLabel) }
 
 func (a *App) installMenubar(current string) {
-	source := filepath.Join(filepath.Dir(current), "AvatarTHU.app")
-	if !exists(filepath.Join(source, "Contents", "MacOS", "AvatarTHUMenuBar")) || abs(source) == abs(a.menubarApp()) {
+	source := desktopSource(current)
+	if source == "" || abs(source) == abs(a.menubarApp()) {
 		return
 	}
 	staging := a.menubarApp() + ".new-" + randomID(4)
 	defer os.RemoveAll(staging)
-	check(filepath.WalkDir(source, func(p string, d os.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		ensure(d.Type()&os.ModeSymlink == 0, "菜单栏发布包包含不支持的符号链接")
-		if d.IsDir() {
-			return nil
-		}
-		rel, e := filepath.Rel(source, p)
-		if e != nil {
-			return e
-		}
-		info, e := d.Info()
-		if e != nil {
-			return e
-		}
-		ensure(info.Mode().IsRegular(), "菜单栏发布包包含非普通文件")
-		target := filepath.Join(staging, rel)
-		copyFile(p, target)
-		return os.Chmod(target, info.Mode().Perm())
-	}))
+	check(copyDesktopBundle(source, staging))
 	// A fresh isolated installation must not stop another data directory's UI.
 	wasLoaded := exists(a.menubarExecutable()) && a.quiet("launchctl", "print", menubarDomain())
 	if wasLoaded {
 		a.quiet("launchctl", "bootout", menubarDomain())
 		defer a.startMenubarIfEnabled()
+	} else if a.desktopRunning() {
+		defer a.startMenubarIfEnabled()
 	}
+	a.quitDesktop()
 	check(replaceMenubarBundle(staging, a.menubarApp()))
-	fmt.Println("已安装 macOS 菜单栏：" + a.menubarApp())
-}
-
-func replaceMenubarBundle(staging, target string) error {
-	backup := target + ".old-" + randomID(4)
-	_, e := os.Lstat(target)
-	hadPrevious := e == nil
-	if e != nil && !os.IsNotExist(e) {
-		return e
-	}
-	if hadPrevious {
-		if e := os.Rename(target, backup); e != nil {
-			return e
+	if os.Getenv("AVATARTHU_HOME") == "" {
+		home, e := os.UserHomeDir()
+		check(e)
+		applications := filepath.Join(home, "Applications")
+		mkdir(applications)
+		shortcut := filepath.Join(applications, "AvatarTHU.app")
+		if _, e := os.Lstat(shortcut); os.IsNotExist(e) {
+			check(os.Symlink(a.menubarApp(), shortcut))
 		}
 	}
-	if e := os.Rename(staging, target); e != nil {
-		if hadPrevious {
-			if rollback := os.Rename(backup, target); rollback != nil {
-				return fmt.Errorf("菜单栏更新失败：%v；旧版本保留在 %s：%v", e, backup, rollback)
-			}
-		}
-		return e
-	}
-	if hadPrevious {
-		_ = os.RemoveAll(backup)
-	}
-	return nil
+	fmt.Println("已安装 AvatarTHU 桌面 App：" + a.menubarApp())
 }
 
 func (a *App) menubarSpec() string {
-	return `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>` + menubarLabel + `</string><key>ProgramArguments</key><array><string>` + esc(a.menubarExecutable()) + `</string><string>--home</string><string>` + esc(a.Root) + `</string></array><key>WorkingDirectory</key><string>` + esc(a.Root) + `</string><key>EnvironmentVariables</key><dict><key>AVATARTHU_HOME</key><string>` + esc(a.Root) + `</string><key>PATH</key><string>` + esc(os.Getenv("PATH")) + `</string></dict><key>RunAtLoad</key><true/><key>LimitLoadToSessionType</key><string>Aqua</string><key>StandardOutPath</key><string>` + esc(filepath.Join(a.Root, "logs", "menubar.log")) + `</string><key>StandardErrorPath</key><string>` + esc(filepath.Join(a.Root, "logs", "menubar.log")) + `</string></dict></plist>`
+	return `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>` + menubarLabel + `</string><key>ProgramArguments</key><array><string>` + esc(a.menubarExecutable()) + `</string><string>--hidden</string><string>--home</string><string>` + esc(a.Root) + `</string></array><key>WorkingDirectory</key><string>` + esc(a.Root) + `</string><key>EnvironmentVariables</key><dict><key>AVATARTHU_HOME</key><string>` + esc(a.Root) + `</string><key>PATH</key><string>` + esc(os.Getenv("PATH")) + `</string></dict><key>RunAtLoad</key><true/><key>LimitLoadToSessionType</key><string>Aqua</string><key>StandardOutPath</key><string>` + esc(filepath.Join(a.Root, "logs", "menubar.log")) + `</string><key>StandardErrorPath</key><string>` + esc(filepath.Join(a.Root, "logs", "menubar.log")) + `</string></dict></plist>`
 }
 func (a *App) setMenubarEnabled(enabled bool) {
 	defer a.lock("settings", true)()
@@ -129,13 +99,14 @@ func (a *App) startMenubarIfEnabled() {
 func (a *App) stopMenubar() {
 	a.quiet("launchctl", "bootout", menubarDomain())
 	_ = os.Remove(a.menubarPlist())
+	a.quitDesktop()
 }
 func (a *App) menubarCommand(action string) {
 	switch action {
 	case "start":
 		a.startMenubar()
 		a.setMenubarEnabled(true)
-		fmt.Println("菜单栏已启动，登录系统时自动显示；监控现有后台，不重复启动课程循环。")
+		fmt.Println("菜单栏已启动，登录系统时自动显示；点击菜单栏直接打开 App；课程后台独立运行。")
 	case "stop":
 		a.setMenubarEnabled(false)
 		a.stopMenubar()

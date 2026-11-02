@@ -26,9 +26,10 @@ func must(err error) {
 }
 func main() {
 	dest := flag.String("out", "dist", "output directory")
-	version := flag.String("version", "0.2.0-alpha.8", "version without v")
+	version := flag.String("version", "0.3.0-alpha.1", "version without v")
 	targetOS := flag.String("os", runtime.GOOS, "target operating system")
 	targetArch := flag.String("arch", runtime.GOARCH, "target architecture")
+	cliOnly := flag.Bool("cli-only", false, "build only the native Go CLI")
 	flag.Parse()
 	must(os.MkdirAll(*dest, 0755))
 	stage, err := os.MkdirTemp("", "avatarthu-release-")
@@ -43,9 +44,6 @@ func main() {
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+*targetOS, "GOARCH="+*targetArch)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	must(cmd.Run())
-	if *targetOS == "darwin" {
-		buildMenubar(stage, *targetArch, *version)
-	}
 	copyFile("README.md", filepath.Join(stage, "README.md"))
 	copyFile("README.en.md", filepath.Join(stage, "README.en.md"))
 	must(filepath.WalkDir("docs/images", func(p string, d os.DirEntry, e error) error {
@@ -73,7 +71,11 @@ func main() {
 		}
 		return nil
 	}))
-	copyFile(filepath.Join(runtime.GOROOT(), "LICENSE"), filepath.Join(stage, "licenses", "Go-LICENSE"))
+	goLicense := filepath.Join(runtime.GOROOT(), "LICENSE")
+	if _, e := os.Stat(goLicense); os.IsNotExist(e) && filepath.Base(runtime.GOROOT()) == "libexec" {
+		goLicense = filepath.Join(filepath.Dir(runtime.GOROOT()), "LICENSE")
+	}
+	copyFile(goLicense, filepath.Join(stage, "licenses", "Go-LICENSE"))
 	mods, err := exec.Command("go", "list", "-m", "-json", "all").Output()
 	must(err)
 	decoder := json.NewDecoder(strings.NewReader(string(mods)))
@@ -97,6 +99,9 @@ func main() {
 				break
 			}
 		}
+	}
+	if !*cliOnly {
+		buildDesktop(stage, *targetOS, *targetArch, *version, binary)
 	}
 	files := []string{}
 	must(filepath.WalkDir(stage, func(p string, d os.DirEntry, e error) error {
@@ -135,14 +140,22 @@ func main() {
 		gz := gzip.NewWriter(f)
 		tw := tar.NewWriter(gz)
 		for _, p := range files {
-			info, e := os.Stat(p)
+			info, e := os.Lstat(p)
 			must(e)
-			header, e := tar.FileInfoHeader(info, "")
+			link := ""
+			if info.Mode()&os.ModeSymlink != 0 {
+				link, e = os.Readlink(p)
+				must(e)
+			}
+			header, e := tar.FileInfoHeader(info, link)
 			must(e)
 			rel, e := filepath.Rel(stage, p)
 			must(e)
 			header.Name = filepath.ToSlash(rel)
 			must(tw.WriteHeader(header))
+			if info.Mode()&os.ModeSymlink != 0 {
+				continue
+			}
 			src, e := os.Open(p)
 			must(e)
 			_, e = io.Copy(tw, src)
@@ -174,25 +187,17 @@ func copyFile(src, dst string) {
 	must(e)
 }
 
-func buildMenubar(stage, arch, version string) {
-	if runtime.GOOS != "darwin" {
-		panic("macOS 发布包需在 macOS 上使用系统 Swift 工具链构建菜单栏")
+func buildDesktop(stage, targetOS, arch, version, binary string) {
+	platform := targetOS
+	if platform == "windows" {
+		platform = "win32"
 	}
-	target := map[string]string{"arm64": "arm64-apple-macos12.0", "amd64": "x86_64-apple-macos12.0"}[arch]
-	if target == "" {
-		panic("unsupported macOS architecture: " + arch)
+	if arch == "amd64" {
+		arch = "x64"
 	}
-	app := filepath.Join(stage, "AvatarTHU.app")
-	binary := filepath.Join(app, "Contents", "MacOS", "AvatarTHUMenuBar")
-	must(os.MkdirAll(filepath.Dir(binary), 0755))
-	cmd := exec.Command("xcrun", "swiftc", "-O", "-swift-version", "5", "-target", target, "macos/AvatarTHU/main.swift", "macos/AvatarTHU/StatusWindow.swift", "-o", binary)
+	cmd := exec.Command("node", "desktop/package.cjs", "--platform", platform, "--arch", arch, "--version", version, "--out", stage, "--backend", binary)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	must(cmd.Run())
-	plist, err := os.ReadFile("macos/AvatarTHU/Info.plist")
-	must(err)
-	must(os.WriteFile(filepath.Join(app, "Contents", "Info.plist"), []byte(strings.ReplaceAll(string(plist), "VERSION", strings.SplitN(version, "-", 2)[0])), 0644))
-	copyFile("macos/AvatarTHU/Resources/TsinghuaSeal.svg", filepath.Join(app, "Contents", "Resources", "TsinghuaSeal.svg"))
-	cmd = exec.Command("codesign", "--force", "--sign", "-", app)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	must(cmd.Run())
+	if e := cmd.Run(); e != nil {
+		panic(fmt.Errorf("desktop build failed; run npm ci --prefix desktop first: %w", e))
+	}
 }

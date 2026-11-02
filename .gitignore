@@ -20,3 +20,7 @@ build/
 dist/
 *.exe
 *.test
+node_modules/
+desktop/assets/*.png
+desktop/assets/*.icns
+desktop/assets/*.ico

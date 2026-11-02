@@ -65,6 +65,14 @@ func Main(args []string) (code int) {
 		a.configure(args[1:])
 	case "status":
 		a.status()
+	case "app":
+		f := flag.NewFlagSet("app", flag.ContinueOnError)
+		view := f.String("view", "overview", "overview、courses、files、artifacts 或 settings")
+		task := f.String("task", "", "作业编号")
+		editor := f.Bool("editor", false, "在 App 中编辑报告")
+		check(f.Parse(args[1:]))
+		ensure(f.NArg() == 0, "用法：avatarthu app [--view 页面] [--task 作业编号] [--editor]")
+		a.openDesktop(*task, *editor, *view)
 	case "ignore":
 		ensure(len(args) >= 2, "用法：avatarthu ignore 作业编号 [--reason 原因]")
 		f := flag.NewFlagSet("ignore", flag.ContinueOnError)
@@ -395,10 +403,11 @@ avatarthu configure --max-review-rounds 3   复审不通过自动重写，0 表�
 avatarthu export 作业编号                  导出单层提交包，保留已发布版本
 avatarthu files 作业编号                   校验最终提交文件夹并输出路径
 avatarthu service start|stop|status         管理后台进程
-avatarthu menubar start|stop|status         macOS 原生菜单栏监控
+avatarthu menubar start|stop|status         桌面 App 菜单栏
 avatarthu run [--sync-only] [--task ID]     立即扫描或处理
 avatarthu revise ID --feedback "修改意见"  本地提出修改
-avatarthu web [--no-open]                  打开课程、文件和产物工作台
+avatarthu app [--view VIEW] [--task ID]     打开桌面工作台
+avatarthu web [--no-open]                  兼容入口，默认打开 App
 avatarthu edit [--no-open] [ID]            编辑报告、局部调用 Agent、提交定稿
 avatarthu keepalive status|run              查看或立即保活
 avatarthu notifications on|off              可选飞书推送
