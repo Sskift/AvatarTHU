@@ -1,7 +1,7 @@
 {
   "name": "avatarthu-desktop",
   "productName": "AvatarTHU",
-  "version": "0.3.0-alpha.4",
+  "version": "0.3.0-alpha.5",
   "private": true,
   "description": "AvatarTHU desktop workspace and menu bar",
   "author": "Sskift",

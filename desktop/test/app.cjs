@@ -17,6 +17,15 @@ const {promisify} = require('node:util');
   const draft = {version: 1, base_revision: 1, markdown: '# 实验报告\n\n这是独立的桌面测试材料。', base_markdown: '# 实验报告\n\n这是独立的桌面测试材料。'};
   let writes = 0, syncs = 0, unauthorized = 0, offline = false, unavailable = false, electron;
   let heldOverview, holdNextOverview = false, overviewWaiting;
+  let heldDirectory;
+  const holdDirectory = pathname => {
+    let started, release;
+    const requested = new Promise(resolve => { started = resolve; });
+    const pending = new Promise(resolve => { release = resolve; });
+    const request = {pathname, started, pending, release: () => { if (heldDirectory === request) heldDirectory = null; release(); }};
+    heldDirectory = request;
+    return {requested, release: request.release};
+  };
   const signalState = async () => {
     const file = path.join(root, 'data/tasks', taskID + '.json');
     await fs.writeFile(file + '.tmp', JSON.stringify(task)); await fs.rename(file + '.tmp', file);
@@ -71,7 +80,9 @@ const {promisify} = require('node:util');
         };
         const breadcrumbs = [{title:'数字信号处理',path:''}];
         if(current) current.split('/').forEach((name,i,parts)=>breadcrumbs.push({title:name==='lab1'?task.title:name,path:parts.slice(0,i+1).join('/')}));
-        return json({path:current,breadcrumbs,entries:folders[current]||[]});
+        const captured = JSON.parse(JSON.stringify({path:current,breadcrumbs,entries:folders[current]||[]}));
+        if (heldDirectory?.pathname === current) { const held = heldDirectory; held.started(); await held.pending; }
+        return json(captured);
       }
       if (url.pathname === '/api/workspace/preview') return json({kind: 'pdf'});
       if (url.pathname === '/api/workspace/file') {
@@ -98,6 +109,7 @@ const {promisify} = require('node:util');
     const baseArgs = executablePath ? [] : [path.resolve(__dirname, '..')];
     electron = await _electron.launch({...(executablePath ? {executablePath} : {}), args: [...baseArgs, '--home', root], env, timeout: 60000});
     const page = await electron.firstWindow();
+    page.setDefaultTimeout(15000);
     page.on('console', message => { if (message.type() === 'error') console.error('Renderer:', message.text()); });
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.getByRole('heading', {name: '现在需要关注', exact: true}).waitFor();
@@ -137,8 +149,25 @@ const {promisify} = require('node:util');
     await new Promise(resolve => setTimeout(resolve, 200)); heldOverview();
     await page.getByRole('heading', {name: '有 1 份作业等你审阅', exact: true}).waitFor({timeout: 2500});
     await page.locator('[data-nav="files"]').click();
+    await page.getByRole('link', {name:'打开目录 数字信号处理',exact:true}).waitFor();
     assert.equal(await page.locator('#directory-results .file-row').count(), 0);
+    await page.evaluate(() => {
+      window.directorySearchNode = document.getElementById('directory-search');
+      window.blankDirectoryFrames = 0; window.sampleDirectoryFrames = true;
+      const sample = () => {
+        if (!window.sampleDirectoryFrames) return;
+        if (!document.querySelector('#directory-results .directory-row, #directory-results .file-row')) window.blankDirectoryFrames++;
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    const openingCourse = holdDirectory('');
     await page.getByRole('link', {name: '打开目录 数字信号处理', exact: true}).click();
+    await openingCourse.requested;
+    await page.locator('#directory-loading').filter({hasText:'正在打开目录…'}).waitFor({timeout:1500});
+    assert.equal(await page.getByRole('link', {name:'打开目录 计算机图形学基础',exact:true}).count(), 1);
+    assert.equal(await page.evaluate(() => window.directorySearchNode === document.getElementById('directory-search')), true);
+    openingCourse.release();
     await page.getByRole('link', {name: '打开目录 homework', exact: true}).click();
     await page.getByRole('link', {name: '打开目录 '+task.title, exact: true}).click();
     await page.getByRole('button', {name: 'submission.zip', exact: true}).waitFor();
@@ -150,14 +179,28 @@ const {promisify} = require('node:util');
     await page.locator('#directory-crumbs').getByRole('link', {name:task.title,exact:true}).click();
     await page.getByRole('link', {name:'打开目录 workspace',exact:true}).click();
     await page.getByRole('link', {name:'打开目录 source',exact:true}).waitFor();
+    const cachedCourse = holdDirectory('');
     await page.locator('#directory-crumbs').getByRole('link', {name:'数字信号处理',exact:true}).click();
+    await cachedCourse.requested;
+    // Returning to a visited directory is immediate, even with revalidation held.
+    await page.getByRole('link', {name:'打开目录 courseware',exact:true}).waitFor({timeout:1000});
     await page.getByRole('link', {name:'打开目录 courseware',exact:true}).click();
     await page.getByRole('button', {name:'lecture.pdf',exact:true}).waitFor();
+    cachedCourse.release();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('path'), 'courseware');
+    assert.equal(await page.getByRole('button', {name:'lecture.pdf',exact:true}).count(), 1);
+    assert.equal(await page.evaluate(() => window.directorySearchNode === document.getElementById('directory-search')), true);
+    assert.equal(await page.evaluate(() => { window.sampleDirectoryFrames = false; return window.blankDirectoryFrames; }), 0);
     await page.locator('#directory-search').fill('lecture');
     material.title = '更新后的课件'; task.updated_at = '2026-11-03T00:00:00+08:00'; await signalState();
     await page.getByRole('button', {name: '更新后的课件', exact: true}).waitFor({timeout: 2500});
     assert.equal(await page.locator('#directory-search').inputValue(), 'lecture');
     assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('path'), 'courseware');
+    await page.evaluate(() => { window.directoryRowNode = document.querySelector('#directory-results .file-row'); document.getElementById('directory-search').focus(); });
+    await page.evaluate(() => refresh());
+    assert.equal(await page.evaluate(() => window.directoryRowNode === document.querySelector('#directory-results .file-row')), true);
+    assert.equal(await page.locator('#directory-search').evaluate(input => input === document.activeElement), true);
     await page.getByRole('button', {name: '预览', exact: true}).click();
     try { await page.waitForFunction(() => document.getElementById('pdf-count')?.textContent === '1' && document.getElementById('pdf-status').textContent === ''); }
     catch (error) { throw new Error(await page.locator('#preview-body').innerText(), {cause: error}); }
@@ -234,9 +277,10 @@ const {promisify} = require('node:util');
     assert.equal(new URL(page.url()).hash, '#view=courses');
     assert.equal(unauthorized, 0);
     assert.deepEqual(errors, []);
-    console.log('Electron: unified course sync during writing, visible/hidden status updates, in-flight catch-up, wake refresh, draft preservation, reconnection, single window, PDF preview/download, and report save passed.');
+    console.log('Electron: flicker-free directory navigation, cached return, stale response protection, unchanged refresh preservation, course sync, live state updates, drafts, reconnection, single window, PDF preview/download, and report save passed.');
     console.log('Observed state update latency (ms): ' + stateLatencies.join(', '));
   } finally {
+    heldDirectory?.release(); heldOverview?.();
     if (electron) await electron.close();
     await new Promise(resolve => server.close(resolve));
     await fs.rm(root, {recursive: true, force: true});

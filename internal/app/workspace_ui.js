@@ -5,6 +5,8 @@ const kinds={courseware:'课件 / 补充资料',assignment:'作业附件',notice
 const harness=name=>name==='claude'?'Claude':name==='codex'?'Codex':'待配置';
 let overview={courses:[],tasks:[],health:{}}, files=[], listed=[], currentView='overview',currentID='',courseTab='tasks',renderID=0,previewID=0,ready=false,uploadCourse='',fileAction=null,taskAction=null,taskFilter='visible',toastTimer;
 let applyingState=null, pendingState=null, stateSequence=0, connectionError='', connectionEpoch=0, settingsDirty=false, routeFailed=false, desktopVersion='', syncRequest=false, directoryPath='', directoryData=null;
+let directoryCourse='', directoryShownKey=null, directoryLoadingTimer;
+const directoryCache=new Map();
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
 function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},4000);}
 async function api(path='',body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const multipart=body instanceof FormData,res=await fetch('/api/workspace'+path,{method:body===undefined?'GET':'POST',cache:'no-store',headers:body===undefined||multipart?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:multipart?body:JSON.stringify(body),signal:controller.signal});const raw=await res.text();let data;try{data=JSON.parse(raw);}catch{data={error:raw};}if(!res.ok)throw new Error(res.status===401?'请从菜单栏重新打开 AvatarTHU。':data.error||'请求未完成');return data;}catch(e){if(e.name==='AbortError'||e instanceof TypeError)throw new Error('暂时连不上本机后台。后台恢复后会自动重新连接。');throw e;}finally{clearTimeout(timer);}}
@@ -33,22 +35,42 @@ const directoryHref=(course='',path='')=>'#'+new URLSearchParams({...(accessToke
 const folderIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
 function folderRow(entry){
  const title=entry.title||entry.name,detail=title!==entry.name?entry.name+'/':entry.description||'文件夹';
- return '<a class="directory-row" href="'+esc(entry.href||directoryHref(currentID,entry.path))+'" aria-label="打开目录 '+esc(title)+'"><span class="folder-icon">'+folderIcon+'</span><span class="directory-name"><strong>'+esc(title)+'</strong><small>'+esc(entry.detail||detail)+'</small></span><span class="directory-arrow" aria-hidden="true">›</span></a>';
+ return '<a class="directory-row" href="'+esc(entry.href||directoryHref(directoryCourse,entry.path))+'" aria-label="打开目录 '+esc(title)+'"><span class="folder-icon">'+folderIcon+'</span><span class="directory-name"><strong>'+esc(title)+'</strong><small>'+esc(entry.detail||detail)+'</small></span><span class="directory-arrow" aria-hidden="true">›</span></a>';
 }
-function directoryShell(){return '<nav id="directory-crumbs" class="breadcrumbs" aria-label="文件目录"></nav><div class="filters directory-tools"><input id="directory-search" type="search" placeholder="搜索当前目录" aria-label="搜索当前目录"></div><div id="directory-results"></div>';}
+function directoryShell(){return '<nav id="directory-crumbs" class="breadcrumbs" aria-label="文件目录"></nav><div class="filters directory-tools"><input id="directory-search" type="search" placeholder="搜索当前目录" aria-label="搜索当前目录"><span id="directory-loading" class="directory-loading" role="status"></span></div><div id="directory-results"></div>';}
+function directoryHTML(id,html){const el=$(id);if(el.directoryHTML===html)return;el.innerHTML=html;el.directoryHTML=html;}
+function directoryBusy(busy){
+ clearTimeout(directoryLoadingTimer);
+ if(!$('directory-results'))return;
+ $('directory-results').setAttribute('aria-busy',String(busy));$('directory-loading').textContent='';
+ if(busy)directoryLoadingTimer=setTimeout(()=>{if($('directory-loading'))$('directory-loading').textContent='正在打开目录…';},200);
+}
 function renderDirectory(){
  const q=($('directory-search')?.value||'').trim().toLocaleLowerCase();listed=[];
- const crumbs=[{title:'文件',url:directoryHref()},...(directoryData?.breadcrumbs||[]).map(c=>({title:c.title,url:directoryHref(currentID,c.path)}))];
- $('directory-crumbs').innerHTML=crumbs.map((c,i)=>i===crumbs.length-1?'<span aria-current="page">'+esc(c.title)+'</span>':'<a href="'+esc(c.url)+'">'+esc(c.title)+'</a><span class="crumb-separator" aria-hidden="true">/</span>').join('');
- const entries=currentID?(directoryData?.entries||[]):overview.courses.map(c=>({kind:'directory',name:c.id,title:c.name,detail:c.semester+' 学期',href:directoryHref(c.id)}));
+ const crumbs=[{title:'文件',url:directoryHref()},...(directoryData?.breadcrumbs||[]).map(c=>({title:c.title,url:directoryHref(directoryCourse,c.path)}))];
+ directoryHTML('directory-crumbs',crumbs.map((c,i)=>i===crumbs.length-1?'<span aria-current="page">'+esc(c.title)+'</span>':'<a href="'+esc(c.url)+'">'+esc(c.title)+'</a><span class="crumb-separator" aria-hidden="true">/</span>').join(''));
+ const entries=directoryCourse?(directoryData?.entries||[]):overview.courses.map(c=>({kind:'directory',name:c.id,title:c.name,detail:c.semester+' 学期',href:directoryHref(c.id)}));
  const shown=entries.filter(f=>!q||[f.name,f.title,f.description,f.detail].filter(Boolean).join(' ').toLocaleLowerCase().includes(q));
- $('directory-results').innerHTML=shown.length?'<div class="file-count">'+shown.length+' 项</div><div class="file-list directory-list">'+shown.map(f=>f.kind==='directory'?folderRow(f):fileRow(f,true)).join('')+'</div>':empty(q?'当前目录没有匹配的项目':'这个目录还没有文件');
+ directoryHTML('directory-results',shown.length?'<div class="file-count">'+shown.length+' 项</div><div class="file-list directory-list">'+shown.map(f=>f.kind==='directory'?folderRow(f):fileRow(f,true)).join('')+'</div>':empty(q?'当前目录没有匹配的项目':'这个目录还没有文件'));
 }
-async function loadDirectory(route){
- const course=currentID,path=directoryPath;
- const data=course?await api('/directory?'+new URLSearchParams({course,path})):null;
- if(route!==renderID||currentView!=='files'||course!==currentID||path!==directoryPath)return;
- directoryData=data;renderDirectory();
+async function loadDirectory(route,navigation=false){
+ const course=currentID,path=directoryPath,key=JSON.stringify([course,path]);
+ const current=()=>route===renderID&&currentView==='files'&&course===currentID&&path===directoryPath;
+ const display=data=>{
+  if(directoryShownKey!==key)$('directory-search').value='';
+  directoryCourse=course;directoryData=data;directoryShownKey=key;renderDirectory();
+ };
+ if(!course){display(null);directoryBusy(false);return;}
+ if(navigation&&directoryCache.has(key))display(directoryCache.get(key));
+ directoryBusy(true);
+ try{
+  const data=await api('/directory?'+new URLSearchParams({course,path}));
+  if(!current())return;
+  directoryCache.delete(key);directoryCache.set(key,data);
+  if(directoryCache.size>32)directoryCache.delete(directoryCache.keys().next().value);
+  display(data);
+ }catch(e){if(current())throw e;}
+ finally{if(current())directoryBusy(false);}
 }
 function renderArtifacts(){
  $('content').innerHTML='<p class="muted">按作业查看当前交付、历史版本和复审记录。</p><div class="task-list" id="artifact-tasks"></div>';
@@ -83,6 +105,7 @@ async function renderRoute(){
  if(!ready)return;routeFailed=false;const id=++renderID,params=new URLSearchParams(location.hash.slice(1));
  if(params.get('task')&&!params.get('view')){location.replace('/editor'+location.hash);return;}
  currentView=params.get('view')||'overview';currentID=params.get('id')||'';directoryPath=params.get('path')||'';
+ if(currentView!=='files')directoryBusy(false);
  const titles={overview:'总览',courses:'我的课程',course:'课程',files:'文件',artifacts:'交付产物',task:'作业',settings:'设置与状态'};
  if(!titles[currentView])currentView='overview';
  const section=currentView==='course'?'courses':currentView==='task'?'artifacts':currentView;
@@ -95,7 +118,10 @@ async function renderRoute(){
   }else if(currentView==='settings')renderSettings(overview.health);
   else if(currentView==='artifacts')renderArtifacts();
   else if(currentView==='files'){
-   directoryData=null;$('content').innerHTML=directoryShell();$('directory-results').innerHTML=empty('正在载入目录…');await loadDirectory(id);
+   if(!$('directory-results')){
+    directoryData=null;directoryShownKey=null;$('content').innerHTML=directoryShell();
+   }
+   await loadDirectory(id,true);
   }else if(currentView==='task'){
    $('content').innerHTML=empty('正在载入作业…');const t=await api('/task/'+encodeURIComponent(currentID));if(id!==renderID)return;$('title').textContent=t.title;renderTask(t);
   }else{
@@ -104,7 +130,7 @@ async function renderRoute(){
    files=loaded;$('title').textContent=c.name;renderCourse(c);
   }
   if(id===renderID)updateHealth(overview.health);
- }catch(e){if(id===renderID){routeFailed=true;error(e.message);$('content').innerHTML=empty('暂时无法载入','正在自动重试，也可以点击同步课程。');}}
+ }catch(e){if(id===renderID){routeFailed=true;error(e.message);if(currentView!=='files')$('content').innerHTML=empty('暂时无法载入','正在自动重试，也可以点击同步课程。');}}
 }
 function renderCourseResults(){const q=($('course-search')?.value||'').toLocaleLowerCase(),semester=$('semester-filter')?.value||'';const rows=overview.courses.filter(c=>(!q||c.name.toLocaleLowerCase().includes(q))&&(!semester||c.semester===semester));$('course-results').innerHTML=rows.map(courseCard).join('')||empty('没有匹配的课程','可以先同步课程，或更换搜索条件。');}
 function disconnected(message){
