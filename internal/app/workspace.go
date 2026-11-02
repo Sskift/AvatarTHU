@@ -100,15 +100,23 @@ func publicCourseFile(rel string) string {
 			p = append(append([]string{}, p[:2]...), p[3:]...)
 		}
 		switch p[2] {
+		case "submission":
+			return "submission"
 		case "source":
 			return "assignment"
 		case "report-source":
 			return "source"
 		case "outputs":
+			if len(p) == 5 && p[4] == "submission.zip" {
+				return "submission"
+			}
 			if p[len(p)-1] != "review.md" && p[len(p)-1] != "submission.zip" {
 				return "artifact"
 			}
 		}
+	}
+	if len(p) == 3 && p[0] == "homework" && p[2] == "submission.zip" {
+		return "submission"
 	}
 	return ""
 }
@@ -144,7 +152,7 @@ func (a *App) workspaceFiles(c workspaceCourse) []M {
 				continue
 			}
 			kind := publicCourseFile(rel)
-			if kind == "" {
+			if kind == "" || kind == "submission" {
 				continue
 			}
 			info, e := os.Stat(file)
@@ -429,6 +437,8 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 				}
 			}
 			result = rows
+		case r.Method == "GET" && action == "directory":
+			result = a.workspaceDirectory(a.workspaceCourse(r.URL.Query().Get("course")), r.URL.Query().Get("path"))
 		case r.Method == "GET" && action == "task" && len(parts) == 4:
 			result = a.workspaceTask(parts[3])
 		case r.Method == "POST" && action == "task" && len(parts) == 5 && (parts[4] == "ignore" || parts[4] == "restore"):

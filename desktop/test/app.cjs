@@ -11,7 +11,7 @@ const {promisify} = require('node:util');
 (async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'avatar-desktop-test-'));
   const token = 'b'.repeat(64), taskID = '0123456789abcdef';
-  const task = {id: taskID, title: 'Lab 1 · 信号与频谱', course: '数字信号处理', course_id: 'course1', status: 'awaiting', revision: 1, deadline: '2026-11-20 23:59', can_submit: false};
+  const task = {id: taskID, title: 'Lab 1 · 信号与频谱', course: '数字信号处理', course_id: 'course1', status: 'awaiting', revision: 1, deadline: '2026-11-20 23:59', can_submit: false, artifact_count: 2};
   const health = {daemon: {state: 'running', phase: '等待调度'}, learn: {state: 'valid'}, lark: {enabled: false}, cli: [{tool: 'codex', state: 'ready', required: true}, {tool: 'claude', state: 'unknown', required: false}], writer: 'codex', reviewer: 'codex', poll_hours: 12, scan: {}, version: 'desktop-fixture'};
   const overview = {courses: [{id: 'course1', name: '数字信号处理', semester: '2026-2027-1', tasks: 1}, {id: 'course2', name: '计算机图形学基础', semester: '2026-2027-1', tasks: 0}], tasks: [task], health};
   const draft = {version: 1, base_revision: 1, markdown: '# 实验报告\n\n这是独立的桌面测试材料。', base_markdown: '# 实验报告\n\n这是独立的桌面测试材料。'};
@@ -58,6 +58,21 @@ const {promisify} = require('node:util');
         await signalState(); return json(health.scan);
       }
       if (url.pathname === '/api/workspace/files') return json([material]);
+      if (url.pathname === '/api/workspace/directory') {
+        const current = url.searchParams.get('path') || '';
+        const dir = (name, title=name) => ({name, title, path: [current,name].filter(Boolean).join('/'), kind:'directory'});
+        const folders = {
+          '': [dir('courseware'),dir('homework'),dir('notices')],
+          'courseware': [material],
+          'homework': [dir('lab1',task.title)],
+          'homework/lab1': [dir('submission'),{name:'submission.zip',path:'homework/lab1/submission.zip',kind:'submission',size:128,course_id:'course1'},dir('workspace'),dir('presentation')],
+          'homework/lab1/submission': [{name:'report.pdf',path:'homework/lab1/submission/report.pdf',kind:'submission',size:pdf.length,course_id:'course1'}],
+          'homework/lab1/workspace': [dir('source')]
+        };
+        const breadcrumbs = [{title:'数字信号处理',path:''}];
+        if(current) current.split('/').forEach((name,i,parts)=>breadcrumbs.push({title:name==='lab1'?task.title:name,path:parts.slice(0,i+1).join('/')}));
+        return json({path:current,breadcrumbs,entries:folders[current]||[]});
+      }
       if (url.pathname === '/api/workspace/preview') return json({kind: 'pdf'});
       if (url.pathname === '/api/workspace/file') {
         res.setHeader('Content-Type', 'application/pdf');
@@ -122,10 +137,27 @@ const {promisify} = require('node:util');
     await new Promise(resolve => setTimeout(resolve, 200)); heldOverview();
     await page.getByRole('heading', {name: '有 1 份作业等你审阅', exact: true}).waitFor({timeout: 2500});
     await page.locator('[data-nav="files"]').click();
-    await page.locator('#file-search').fill('lecture');
+    assert.equal(await page.locator('#directory-results .file-row').count(), 0);
+    await page.getByRole('link', {name: '打开目录 数字信号处理', exact: true}).click();
+    await page.getByRole('link', {name: '打开目录 homework', exact: true}).click();
+    await page.getByRole('link', {name: '打开目录 '+task.title, exact: true}).click();
+    await page.getByRole('button', {name: 'submission.zip', exact: true}).waitFor();
+    assert.equal(await page.locator('#directory-results .directory-row').count(), 3);
+    assert.equal(await page.locator('#directory-results .file-row').count(), 1);
+    if (screenshotDir) await page.screenshot({path: path.join(screenshotDir, 'desktop-directories.png')});
+    await page.getByRole('link', {name:'打开目录 submission',exact:true}).click();
+    await page.getByRole('button', {name:'report.pdf',exact:true}).waitFor();
+    await page.locator('#directory-crumbs').getByRole('link', {name:task.title,exact:true}).click();
+    await page.getByRole('link', {name:'打开目录 workspace',exact:true}).click();
+    await page.getByRole('link', {name:'打开目录 source',exact:true}).waitFor();
+    await page.locator('#directory-crumbs').getByRole('link', {name:'数字信号处理',exact:true}).click();
+    await page.getByRole('link', {name:'打开目录 courseware',exact:true}).click();
+    await page.getByRole('button', {name:'lecture.pdf',exact:true}).waitFor();
+    await page.locator('#directory-search').fill('lecture');
     material.title = '更新后的课件'; task.updated_at = '2026-11-03T00:00:00+08:00'; await signalState();
     await page.getByRole('button', {name: '更新后的课件', exact: true}).waitFor({timeout: 2500});
-    assert.equal(await page.locator('#file-search').inputValue(), 'lecture');
+    assert.equal(await page.locator('#directory-search').inputValue(), 'lecture');
+    assert.equal(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('path'), 'courseware');
     await page.getByRole('button', {name: '预览', exact: true}).click();
     try { await page.waitForFunction(() => document.getElementById('pdf-count')?.textContent === '1' && document.getElementById('pdf-status').textContent === ''); }
     catch (error) { throw new Error(await page.locator('#preview-body').innerText(), {cause: error}); }
@@ -136,6 +168,11 @@ const {promisify} = require('node:util');
     await page.getByRole('link', {name: '下载', exact: true}).click();
     for (let n = 0; n < 50; n++) { try { if ((await fs.stat(savedPDF)).size === pdf.length) break; } catch {} await new Promise(resolve => setTimeout(resolve, 100)); }
     assert.deepEqual(await fs.readFile(savedPDF), pdf);
+    await page.locator('[data-nav="artifacts"]').click();
+    await page.locator('#artifact-tasks').getByRole('link', {name:/Lab 1/}).waitFor();
+    assert.equal(await page.getByRole('heading', {name:'产物与源文件',exact:true}).count(), 0);
+    assert.equal(await page.locator('#content .file-list, #file-search').count(), 0);
+    if (screenshotDir) await page.screenshot({path:path.join(screenshotDir,'desktop-artifacts.png')});
     await page.locator('[data-nav="courses"]').click();
     await page.locator('.course-card').first().click();
     await page.locator('.task-row').first().click();

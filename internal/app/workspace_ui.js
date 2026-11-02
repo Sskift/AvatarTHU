@@ -4,7 +4,7 @@ const phaseNames={awaiting:'待你审阅',needs_student:'需要修改',revision_
 const kinds={courseware:'课件 / 补充资料',assignment:'作业附件',notice:'公告',artifact:'产物',source:'报告源文件'};
 const harness=name=>name==='claude'?'Claude':name==='codex'?'Codex':'待配置';
 let overview={courses:[],tasks:[],health:{}}, files=[], listed=[], currentView='overview',currentID='',courseTab='tasks',renderID=0,previewID=0,ready=false,uploadCourse='',fileAction=null,taskAction=null,taskFilter='visible',toastTimer;
-let applyingState=null, pendingState=null, stateSequence=0, connectionError='', connectionEpoch=0, settingsDirty=false, routeFailed=false, desktopVersion='', syncRequest=false;
+let applyingState=null, pendingState=null, stateSequence=0, connectionError='', connectionEpoch=0, settingsDirty=false, routeFailed=false, desktopVersion='', syncRequest=false, directoryPath='', directoryData=null;
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
 function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>{$('toast').hidden=true;},4000);}
 async function api(path='',body){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const multipart=body instanceof FormData,res=await fetch('/api/workspace'+path,{method:body===undefined?'GET':'POST',cache:'no-store',headers:body===undefined||multipart?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:multipart?body:JSON.stringify(body),signal:controller.signal});const raw=await res.text();let data;try{data=JSON.parse(raw);}catch{data={error:raw};}if(!res.ok)throw new Error(res.status===401?'请从菜单栏重新打开 AvatarTHU。':data.error||'请求未完成');return data;}catch(e){if(e.name==='AbortError'||e instanceof TypeError)throw new Error('暂时连不上本机后台。后台恢复后会自动重新连接。');throw e;}finally{clearTimeout(timer);}}
@@ -24,7 +24,37 @@ function healthHTML(h){const learn=h.learn||{},lark=h.lark||{},daemon=h.daemon||
 function updateHealth(h){overview.health=h;const daemon=h.daemon||{},connected=daemon.state==='running'&&!daemon.problem;$('connection').textContent=connected?'本机后台运行中':'后台状态待检查';$('connection-dot').className='dot'+(connected?' ready':'');$('footer').textContent='AvatarTHU '+(desktopVersion||h.version||'')+' · '+(connected?'本机后台运行中':'后台状态待检查')+' · 主写 '+harness(h.writer)+' / 复审 '+harness(h.reviewer);const scan=h.scan||{},busy=['queued','running'].includes(scan.state);$('scan').disabled=busy||syncRequest;$('scan').textContent=scan.state==='running'?'正在同步…':busy||syncRequest?'正在连接学堂…':'同步课程';if($('health'))$('health').innerHTML=healthHTML(h);if($('scan-result'))$('scan-result').textContent=scan.state==='error'?'最近同步失败：'+(scan.error||'未知错误'):scan.state==='completed'?'最近同步完成于 '+date(scan.completed_at):scan.state==='queued'?'正在连接网络学堂，同步独立进行。':scan.state==='running'?'正在同步课程和作业，完成后自动更新。':'';}
 function renderOverview(){const tasks=overview.tasks,pending=tasks.filter(needsReview),help=tasks.filter(needsHelp),todo=[...help,...pending,...tasks.filter(active)];$('content').innerHTML='<section class="hero"><div><h2>'+(pending.length?'有 '+pending.length+' 份作业等你审阅':'今天的安排')+'</h2><p>留意待办与截止时间，其余交给后台。</p></div><span class="hero-number">'+new Date().toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'})+'</span></section><div class="metrics">'+[[overview.courses.length,'门课程'],[pending.length,'份待审阅'],[tasks.filter(active).length,'份处理中'],[help.length,'份需处理']].map(([n,label])=>'<div class="metric"><strong>'+n+'</strong><span>'+label+'</span></div>').join('')+'</div><div class="section-heading"><h2>现在需要关注</h2><a href="'+href('artifacts')+'">浏览产物 →</a></div><div class="task-list">'+(todo.length?todo.map(taskRow).join(''):empty('暂时没有待办','课程扫描后，新作业会出现在这里。'))+'</div><div class="section-heading"><h2>我的课程</h2><a href="'+href('courses')+'">全部课程 →</a></div><div class="grid">'+overview.courses.slice(0,6).map(courseCard).join('')+'</div><div class="section-heading"><h2>连接与运行状态</h2><a href="'+href('settings')+'">管理设置 →</a></div><section class="panel" id="health"></section>';}
 function filterBar(includeKind=true){return '<div class="filters"><input id="file-search" type="search" placeholder="搜索文件名或路径" aria-label="搜索文件名或路径">'+(currentView==='course'?'':'<select id="course-filter" aria-label="筛选课程"><option value="">所有课程</option>'+overview.courses.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('')+'</select>')+(includeKind?'<select id="kind-filter" aria-label="筛选类型"><option value="">全部类型</option>'+Object.entries(kinds).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join('')+'</select>':'')+'</div><div id="file-results"></div>';}
-function fileRows(rows){if(!rows.length)return empty('没有匹配的文件','更换筛选条件，或扫描课程获取最新资料。');return '<div class="file-list">'+rows.map(f=>{const i=listed.push(f)-1,ext=f.name.includes('.')?f.name.split('.').pop().slice(0,5).toUpperCase():'FILE';return '<div class="file-row" data-editable="'+!!f.editable+'"><span class="file-icon">'+esc(ext)+'</span><div><button class="file-name" data-preview="'+i+'">'+esc(f.title||f.name)+'</button><span class="file-path">'+esc((f.course?f.course+' / ':'')+f.path)+'</span></div><span class="file-size">'+size(f.size)+'</span><span class="file-date">'+esc(date(f.modified_at))+'</span><div class="actions"><button data-preview="'+i+'">预览</button><a class="button" href="'+esc(fileURL(f))+'" download>下载</a>'+(f.editable?'<button data-rename="'+i+'">改名</button><button data-remove="'+i+'">移除</button>':'')+'</div></div>';}).join('')+'</div>';}
+function fileRow(f,compact=false){
+ const i=listed.push(f)-1,ext=f.name.includes('.')?f.name.split('.').pop().slice(0,5).toUpperCase():'FILE';
+ return '<div class="file-row" data-editable="'+!!f.editable+'"><span class="file-icon">'+esc(ext)+'</span><div><button class="file-name" data-preview="'+i+'">'+esc(f.title||f.name)+'</button>'+(compact?'':'<span class="file-path">'+esc((f.course?f.course+' / ':'')+f.path)+'</span>')+'</div><span class="file-size">'+size(f.size)+'</span><span class="file-date">'+esc(date(f.modified_at))+'</span><div class="actions"><button data-preview="'+i+'">预览</button><a class="button" href="'+esc(fileURL(f))+'" download>下载</a>'+(f.editable?'<button data-rename="'+i+'">改名</button><button data-remove="'+i+'">移除</button>':'')+'</div></div>';
+}
+function fileRows(rows){return rows.length?'<div class="file-list">'+rows.map(f=>fileRow(f)).join('')+'</div>':empty('没有匹配的文件','更换筛选条件，或同步课程获取最新资料。');}
+const directoryHref=(course='',path='')=>'#'+new URLSearchParams({...(accessToken?{token:accessToken}:{}),view:'files',...(course?{id:course}:{}),...(path?{path}: {})});
+const folderIcon='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>';
+function folderRow(entry){
+ const title=entry.title||entry.name,detail=title!==entry.name?entry.name+'/':entry.description||'文件夹';
+ return '<a class="directory-row" href="'+esc(entry.href||directoryHref(currentID,entry.path))+'" aria-label="打开目录 '+esc(title)+'"><span class="folder-icon">'+folderIcon+'</span><span class="directory-name"><strong>'+esc(title)+'</strong><small>'+esc(entry.detail||detail)+'</small></span><span class="directory-arrow" aria-hidden="true">›</span></a>';
+}
+function directoryShell(){return '<nav id="directory-crumbs" class="breadcrumbs" aria-label="文件目录"></nav><div class="filters directory-tools"><input id="directory-search" type="search" placeholder="搜索当前目录" aria-label="搜索当前目录"></div><div id="directory-results"></div>';}
+function renderDirectory(){
+ const q=($('directory-search')?.value||'').trim().toLocaleLowerCase();listed=[];
+ const crumbs=[{title:'文件',url:directoryHref()},...(directoryData?.breadcrumbs||[]).map(c=>({title:c.title,url:directoryHref(currentID,c.path)}))];
+ $('directory-crumbs').innerHTML=crumbs.map((c,i)=>i===crumbs.length-1?'<span aria-current="page">'+esc(c.title)+'</span>':'<a href="'+esc(c.url)+'">'+esc(c.title)+'</a><span class="crumb-separator" aria-hidden="true">/</span>').join('');
+ const entries=currentID?(directoryData?.entries||[]):overview.courses.map(c=>({kind:'directory',name:c.id,title:c.name,detail:c.semester+' 学期',href:directoryHref(c.id)}));
+ const shown=entries.filter(f=>!q||[f.name,f.title,f.description,f.detail].filter(Boolean).join(' ').toLocaleLowerCase().includes(q));
+ $('directory-results').innerHTML=shown.length?'<div class="file-count">'+shown.length+' 项</div><div class="file-list directory-list">'+shown.map(f=>f.kind==='directory'?folderRow(f):fileRow(f,true)).join('')+'</div>':empty(q?'当前目录没有匹配的项目':'这个目录还没有文件');
+}
+async function loadDirectory(route){
+ const course=currentID,path=directoryPath;
+ const data=course?await api('/directory?'+new URLSearchParams({course,path})):null;
+ if(route!==renderID||currentView!=='files'||course!==currentID||path!==directoryPath)return;
+ directoryData=data;renderDirectory();
+}
+function renderArtifacts(){
+ $('content').innerHTML='<p class="muted">按作业查看当前交付、历史版本和复审记录。</p><div class="task-list" id="artifact-tasks"></div>';
+ renderArtifactTasks();
+}
+function renderArtifactTasks(){const tasks=overview.tasks.filter(t=>t.artifact_count);$('artifact-tasks').innerHTML=tasks.map(taskRow).join('')||empty('还没有完成的产物');}
 function renderFiles(){const q=($('file-search')?.value||'').toLocaleLowerCase(),course=$('course-filter')?.value||'',kind=$('kind-filter')?.value||'';let rows=files.filter(f=>(!q||(f.name+' '+(f.title||'')+' '+f.path+' '+f.course).toLocaleLowerCase().includes(q))&&(!course||f.course_id===course)&&(!kind||f.kind===kind));if(currentView==='artifacts')rows=rows.filter(f=>f.kind==='artifact'||f.kind==='source');if(currentView==='course'&&courseTab!=='all'){const allowed={materials:['courseware','assignment'],notices:['notice'],outputs:['artifact','source']}[courseTab];if(allowed)rows=rows.filter(f=>allowed.includes(f.kind));}listed=[];$('file-results').innerHTML='<div class="file-count">'+rows.length+' 个文件 · '+size(rows.reduce((n,f)=>n+f.size,0))+'</div>'+fileRows(rows);}
 function renderCourseTasks(){
  const tasks=overview.tasks.filter(t=>t.course_id===currentID),shown=tasks.filter(t=>taskFilter==='all'||(taskFilter==='ignored'?t.status==='ignored':t.status!=='ignored'));
@@ -49,7 +79,33 @@ function editTask(id,action){
 }
 function renderTask(t){listed=[];const doc=safeLink(t.document_url),current=(t.revisions||[]).find(r=>r.revision===t.revision),history=(t.revisions||[]).filter(r=>r.revision!==t.revision);$('content').innerHTML='<div class="actions">'+badge(phaseNames[t.status]||t.status,needsHelp(t)?'bad':needsReview(t)?'warn':'')+taskControls(t)+'<a class="button primary" href="/editor#task='+encodeURIComponent(t.id)+'">编辑与审阅报告</a>'+(doc?'<a class="button" href="'+doc+'" target="_blank" rel="noopener noreferrer">飞书审阅文档 ↗</a>':'')+'<a class="button" href="'+href('course',t.course_id)+'">返回课程</a></div>'+(t.status==='ignored'?'<section class="panel ignored-notice" role="status"><h2>这份作业已忽略</h2><p>已停止自动处理和提醒，历史文件与复审记录保留。</p><p class="muted">'+esc(t.ignored_reason||'本人确认无需提交')+' · '+esc(date(t.ignored_at))+'</p></section>':'')+(needsHelp(t)&&t.error?'<p class="error">'+esc(t.error)+'</p>':'')+'<div class="two-column"><section class="panel"><h2>作业要求</h2><p class="muted">'+esc(t.course)+(t.deadline?' · 截止 '+esc(date(t.deadline)):'')+'</p><div class="description">'+esc(t.description||'暂未同步作业描述，请查看课程中的作业附件。')+'</div>'+((t.attachments||[]).length?'<div class="section-heading"><h3>题目附件</h3></div>'+fileRows(t.attachments):'')+'</section><section class="panel"><h2>当前交付 · 第 '+esc(t.revision||1)+' 版</h2><p class="muted">进入编辑页可改正文、多段提意见，再提交定稿同步相关产物。</p><p class="muted">提交到网络学堂仍通过当前版本的飞书作业卡片确认。</p><a class="text-link" href="/api/task/'+encodeURIComponent(t.id)+'/report.html" target="_blank" rel="noopener">打开 HTML 报告预览 ↗</a><div class="meta-line"><span>最近更新 '+esc(date(t.updated_at))+'</span></div></section></div><div class="section-heading"><h2>当前产物</h2><span class="muted">第 '+esc(t.revision||1)+' 版</span></div>'+(current?fileRows(current.files):empty('这一版还没有完成的产物'))+(history.length?'<div class="section-heading"><h2>历史产物</h2></div>'+history.map(r=>'<details class="review"><summary>第 '+r.revision+' 版 · '+r.files.length+' 个文件</summary>'+fileRows(r.files)+'</details>').join(''):'')+'<div class="section-heading"><h2>独立复审记录</h2><span class="muted">'+(t.reviews||[]).length+' 次</span></div>'+((t.reviews||[]).slice().reverse().map(reviewHTML).join('')||empty('尚无复审记录'));}
 function renderSettings(h){settingsDirty=false;$('content').innerHTML='<div class="settings"><form id="settings-form" class="panel"><h2>作业处理方式</h2><div class="form-row">'+[['writer','主写'],['reviewer','复审']].map(([key,label])=>'<label>'+label+'<select name="'+key+'">'+['claude','codex'].map(c=>'<option value="'+c+'" '+(h[key]===c?'selected':'')+'>'+harness(c)+'</option>').join('')+'</select></label>').join('')+'</div><p class="hint">两者分别选择，可以相同。使用各自 CLI 的默认模型配置，每一阶段独立启动新会话。</p><label>课程同步间隔（小时）<input name="poll_hours" type="number" min="0.016667" max="8760" step="any" value="'+esc(h.poll_hours||12)+'" required></label><p class="hint">默认每 12 小时同步课程，网络学堂每 10 分钟保活。更改应用于后续任务，已开始的任务沿用启动时的分工。</p><button class="primary" type="submit">保存设置</button><span id="settings-result" class="muted" role="status"></span></form></div><div class="section-heading"><h2>运行状态</h2></div><section class="panel" id="health"></section><p class="muted" id="scan-result"></p>';}
-async function renderRoute(){if(!ready)return;routeFailed=false;const id=++renderID,params=new URLSearchParams(location.hash.slice(1));if(params.get('task')&&!params.get('view')){location.replace('/editor'+location.hash);return;}currentView=params.get('view')||'overview';currentID=params.get('id')||'';const titles={overview:'总览',courses:'我的课程',course:'课程',files:'全部文件',artifacts:'交付产物',task:'作业',settings:'设置与状态'};if(!titles[currentView])currentView='overview';const section=currentView==='course'?'courses':currentView==='task'?'artifacts':currentView;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===section));$('title').textContent=titles[currentView];$('eyebrow').textContent='AVATARTHU / '+section.toUpperCase();error('');try{if(currentView==='overview')renderOverview();else if(currentView==='courses'){$('content').innerHTML='<div class="filters"><input type="search" id="course-search" placeholder="搜索课程" aria-label="搜索课程"><select id="semester-filter" aria-label="筛选学期"><option value="">全部学期</option>'+[...new Set(overview.courses.map(c=>c.semester))].map(s=>'<option>'+esc(s)+'</option>').join('')+'</select></div><div class="grid" id="course-results"></div>';renderCourseResults();}else if(currentView==='settings')renderSettings(overview.health);else if(currentView==='task'){$('content').innerHTML=empty('正在载入作业…');const t=await api('/task/'+encodeURIComponent(currentID));if(id!==renderID)return;$('title').textContent=t.title;renderTask(t);}else{const c=overview.courses.find(c=>c.id===currentID);if(currentView==='course'&&!c)throw new Error('找不到这门课程，请返回课程列表。');$('content').innerHTML=empty('正在载入文件…');const loaded=await api('/files'+(c?'?course='+encodeURIComponent(c.id):''));if(id!==renderID)return;files=loaded;if(c){$('title').textContent=c.name;renderCourse(c);}else{$('content').innerHTML=(currentView==='artifacts'?'<p class="muted">当前与历史版本的文件均保留。查看对应作业，可以读复审意见、编辑报告。</p><div class="task-list" id="artifact-tasks">'+overview.tasks.filter(t=>t.artifact_count).map(taskRow).join('')+'</div><div class="section-heading"><h2>产物与源文件</h2></div>':'')+filterBar(currentView!=='artifacts');renderFiles();}}updateHealth(overview.health);}catch(e){if(id===renderID){routeFailed=true;error(e.message);$('content').innerHTML=empty('暂时无法载入','正在自动重试，也可以点击同步课程。');}}}
+async function renderRoute(){
+ if(!ready)return;routeFailed=false;const id=++renderID,params=new URLSearchParams(location.hash.slice(1));
+ if(params.get('task')&&!params.get('view')){location.replace('/editor'+location.hash);return;}
+ currentView=params.get('view')||'overview';currentID=params.get('id')||'';directoryPath=params.get('path')||'';
+ const titles={overview:'总览',courses:'我的课程',course:'课程',files:'文件',artifacts:'交付产物',task:'作业',settings:'设置与状态'};
+ if(!titles[currentView])currentView='overview';
+ const section=currentView==='course'?'courses':currentView==='task'?'artifacts':currentView;
+ document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav===section));
+ $('title').textContent=titles[currentView];$('eyebrow').textContent='AVATARTHU / '+section.toUpperCase();error('');
+ try{
+  if(currentView==='overview')renderOverview();
+  else if(currentView==='courses'){
+   $('content').innerHTML='<div class="filters"><input type="search" id="course-search" placeholder="搜索课程" aria-label="搜索课程"><select id="semester-filter" aria-label="筛选学期"><option value="">全部学期</option>'+[...new Set(overview.courses.map(c=>c.semester))].map(s=>'<option>'+esc(s)+'</option>').join('')+'</select></div><div class="grid" id="course-results"></div>';renderCourseResults();
+  }else if(currentView==='settings')renderSettings(overview.health);
+  else if(currentView==='artifacts')renderArtifacts();
+  else if(currentView==='files'){
+   directoryData=null;$('content').innerHTML=directoryShell();$('directory-results').innerHTML=empty('正在载入目录…');await loadDirectory(id);
+  }else if(currentView==='task'){
+   $('content').innerHTML=empty('正在载入作业…');const t=await api('/task/'+encodeURIComponent(currentID));if(id!==renderID)return;$('title').textContent=t.title;renderTask(t);
+  }else{
+   const c=overview.courses.find(c=>c.id===currentID);if(!c)throw new Error('找不到这门课程，请返回课程列表。');
+   $('content').innerHTML=empty('正在载入文件…');const loaded=await api('/files?course='+encodeURIComponent(c.id));if(id!==renderID)return;
+   files=loaded;$('title').textContent=c.name;renderCourse(c);
+  }
+  if(id===renderID)updateHealth(overview.health);
+ }catch(e){if(id===renderID){routeFailed=true;error(e.message);$('content').innerHTML=empty('暂时无法载入','正在自动重试，也可以点击同步课程。');}}
+}
 function renderCourseResults(){const q=($('course-search')?.value||'').toLocaleLowerCase(),semester=$('semester-filter')?.value||'';const rows=overview.courses.filter(c=>(!q||c.name.toLocaleLowerCase().includes(q))&&(!semester||c.semester===semester));$('course-results').innerHTML=rows.map(courseCard).join('')||empty('没有匹配的课程','可以先同步课程，或更换搜索条件。');}
 function disconnected(message){
  connectionEpoch++;connectionError=message;$('connection').textContent='连接中断，正在重试';$('connection-dot').className='dot';error(message);
@@ -64,6 +120,8 @@ async function updateVisibleState(changed,force){
  if(!changed&&!force)return;
  if(view==='overview'){renderOverview();return;}
  if(view==='courses'){renderCourseResults();return;}
+ if(view==='artifacts'){renderArtifactTasks();return;}
+ if(view==='files'){await loadDirectory(++renderID);return;}
  if(view==='course'&&courseTab==='tasks'){renderCourseTasks();return;}
  const route=++renderID;
  if(view==='task'){
@@ -72,11 +130,10 @@ async function updateVisibleState(changed,force){
   renderTask(task);for(const el of document.querySelectorAll('details'))el.open=open.includes(el.querySelector('summary')?.textContent);
   return;
  }
- if(['files','artifacts','course'].includes(view)){
+ if(view==='course'){
   const loaded=await api('/files'+(view==='course'?'?course='+encodeURIComponent(id):''));
   if(route!==renderID||view!==currentView||id!==currentID)return;
   files=loaded;renderFiles();
-  if($('artifact-tasks'))$('artifact-tasks').innerHTML=overview.tasks.filter(t=>t.artifact_count).map(taskRow).join('');
  }
 }
 function applyOverview(fresh,force=false){
@@ -110,7 +167,7 @@ async function previewFile(f){const id=++previewID;await closePDF();$('preview-t
 function editFile(f,action){fileAction={file:f,action};$('file-dialog-title').textContent=action==='rename'?'重命名补充资料':'移除补充资料';$('file-dialog-description').textContent=action==='rename'?f.name:'将「'+f.name+'」移到本机回收目录，后续作业不再引用它。';$('rename-label').hidden=action!=='rename';$('rename-input').required=action==='rename';$('rename-input').value=f.name;$('file-confirm').textContent=action==='rename'?'保存文件名':'移到回收目录';$('file-error').hidden=true;$('file-dialog').showModal();}
 document.addEventListener('click',e=>{const el=e.target.closest('button,a');if(!el)return;const d=el.dataset;if(d.close){$(d.close).close();return;}if(d.preview!==undefined){previewFile(listed[Number(d.preview)]);return;}if(d.rename!==undefined||d.remove!==undefined){editFile(listed[Number(d.rename??d.remove)],d.rename!==undefined?'rename':'remove');return;}if(d.taskAction){editTask(d.taskId,d.taskAction);return;}if(d.upload){uploadCourse=d.upload;$('upload-input').click();return;}if(d.tab){courseTab=d.tab;const c=overview.courses.find(c=>c.id===currentID);renderCourse(c);}});
 document.addEventListener('change',e=>{if(e.target.id==='task-filter'){taskFilter=e.target.value;renderCourseTasks();}});
-document.addEventListener('input',e=>{if(['file-search','course-filter','kind-filter'].includes(e.target.id))renderFiles();if(['course-search','semester-filter'].includes(e.target.id))renderCourseResults();});
+document.addEventListener('input',e=>{if(e.target.id==='directory-search')renderDirectory();if(['file-search','course-filter','kind-filter'].includes(e.target.id))renderFiles();if(['course-search','semester-filter'].includes(e.target.id))renderCourseResults();});
 document.addEventListener('submit',async e=>{if(e.target.id!=='settings-form')return;e.preventDefault();const form=e.target,button=form.querySelector('button[type=submit]');button.disabled=true;try{const data=new FormData(form),h=await api('/settings',{writer:data.get('writer'),reviewer:data.get('reviewer'),poll_hours:Number(data.get('poll_hours'))});settingsDirty=[...data].some(([key,value])=>String(form.elements[key].value)!==String(value));updateHealth(h);$('settings-result').textContent='  已保存';toast('设置已保存');}catch(err){error(err.message);}finally{button.disabled=false;}});
 $('file-form').addEventListener('submit',async e=>{e.preventDefault();if(!fileAction)return;const {file,action}=fileAction;$('file-confirm').disabled=true;try{const result=await api('/file-action',{course:file.course_id,path:file.path,action,name:$('rename-input').value});$('file-dialog').close();toast(result.message);await renderRoute();}catch(err){$('file-error').textContent=err.message;$('file-error').hidden=false;}finally{$('file-confirm').disabled=false;}});
 $('task-form').addEventListener('submit',async e=>{
