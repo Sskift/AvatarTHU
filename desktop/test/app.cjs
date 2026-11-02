@@ -15,7 +15,12 @@ const {promisify} = require('node:util');
   const health = {daemon: {state: 'running', phase: '等待调度'}, learn: {state: 'valid'}, lark: {enabled: false}, cli: [{tool: 'codex', state: 'ready', required: true}, {tool: 'claude', state: 'unknown', required: false}], writer: 'codex', reviewer: 'codex', poll_hours: 12, scan: {}, version: 'desktop-fixture'};
   const overview = {courses: [{id: 'course1', name: '数字信号处理', semester: '2026-2027-1', tasks: 1}, {id: 'course2', name: '计算机图形学基础', semester: '2026-2027-1', tasks: 0}], tasks: [task], health};
   const draft = {version: 1, base_revision: 1, markdown: '# 实验报告\n\n这是独立的桌面测试材料。', base_markdown: '# 实验报告\n\n这是独立的桌面测试材料。'};
-  let writes = 0, unauthorized = 0, offline = false, electron;
+  let writes = 0, unauthorized = 0, offline = false, unavailable = false, electron;
+  let heldOverview, holdNextOverview = false, overviewWaiting;
+  const signalState = async () => {
+    const file = path.join(root, 'data/tasks', taskID + '.json');
+    await fs.writeFile(file + '.tmp', JSON.stringify(task)); await fs.rename(file + '.tmp', file);
+  };
   const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<<>>>>endobj\n4 0 obj<</Length 26>>stream\n0.5 g 30 30 240 140 re f\nendstream\nendobj\ntrailer<</Root 1 0 R>>\n%%EOF');
   const material = {course_id: 'course1', course: '数字信号处理', name: 'lecture.pdf', path: 'courseware/lecture.pdf', kind: 'courseware', size: pdf.length};
   const ui = path.resolve(__dirname, '../../internal/app');
@@ -37,7 +42,16 @@ const {promisify} = require('node:util');
       if (!req.headers.cookie?.includes(token)) { unauthorized++; res.statusCode = 401; json({error: 'unauthorized'}); return; }
       let body = ''; for await (const chunk of req) body += chunk;
       const input = body ? JSON.parse(body) : {};
-      if (url.pathname === '/api/workspace') return json(overview);
+      if (url.pathname === '/api/workspace') {
+        if (unavailable) { res.statusCode = 503; return json({error: 'fixture temporarily unavailable'}); }
+        if (holdNextOverview) {
+          holdNextOverview = false;
+          const captured = JSON.stringify(overview); overviewWaiting();
+          await new Promise(resolve => { heldOverview = resolve; });
+          res.setHeader('Content-Type', 'application/json'); res.end(captured); return;
+        }
+        return json(overview);
+      }
       if (url.pathname === '/api/workspace/health') return json(health);
       if (url.pathname === '/api/workspace/files') return json([material]);
       if (url.pathname === '/api/workspace/preview') return json({kind: 'pdf'});
@@ -57,6 +71,7 @@ const {promisify} = require('node:util');
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
     await fs.mkdir(path.join(root, 'data'), {recursive: true});
+    await fs.mkdir(path.join(root, 'data/tasks'));
     await fs.writeFile(path.join(root, 'config.json'), JSON.stringify({menubar_enabled: false}));
     await fs.writeFile(path.join(root, 'data/editor-endpoint.json'), JSON.stringify({host: '127.0.0.1:' + server.address().port, token}));
     const env = {...process.env}; delete env.ELECTRON_RUN_AS_NODE;
@@ -74,7 +89,25 @@ const {promisify} = require('node:util');
     assert.equal(await page.locator('[data-desktop]').count(), 1);
     const screenshotDir = process.env.AVATARTHU_SCREENSHOTS;
     if (screenshotDir) { await fs.mkdir(screenshotDir, {recursive: true}); await page.screenshot({path: path.join(screenshotDir, 'desktop-overview.png')}); }
+    const stateLatencies = []; let changedAt = performance.now();
+    task.status = 'working'; await signalState();
+    await page.getByRole('link', {name: /Lab 1.*正在撰写/}).waitFor({timeout: 2500});
+    stateLatencies.push(Math.round(performance.now() - changedAt)); changedAt = performance.now();
+    task.status = 'reviewing'; await signalState();
+    await page.getByRole('link', {name: /Lab 1.*独立复审中/}).waitFor({timeout: 2500});
+    stateLatencies.push(Math.round(performance.now() - changedAt));
+    // A change during an older request must be fetched again, not dropped.
+    const requestWaiting = new Promise(resolve => { overviewWaiting = resolve; });
+    holdNextOverview = true; task.status = 'working'; await signalState();
+    await requestWaiting;
+    task.status = 'awaiting'; await signalState();
+    await new Promise(resolve => setTimeout(resolve, 200)); heldOverview();
+    await page.getByRole('heading', {name: '有 1 份作业等你审阅', exact: true}).waitFor({timeout: 2500});
     await page.locator('[data-nav="files"]').click();
+    await page.locator('#file-search').fill('lecture');
+    material.title = '更新后的课件'; task.updated_at = '2026-11-03T00:00:00+08:00'; await signalState();
+    await page.getByRole('button', {name: '更新后的课件', exact: true}).waitFor({timeout: 2500});
+    assert.equal(await page.locator('#file-search').inputValue(), 'lecture');
     await page.getByRole('button', {name: '预览', exact: true}).click();
     try { await page.waitForFunction(() => document.getElementById('pdf-count')?.textContent === '1' && document.getElementById('pdf-status').textContent === ''); }
     catch (error) { throw new Error(await page.locator('#preview-body').innerText(), {cause: error}); }
@@ -93,6 +126,9 @@ const {promisify} = require('node:util');
     assert.equal(electron.windows().length, 1);
     await page.getByRole('tab', {name: 'Markdown', exact: true}).click();
     await page.locator('#markdown').fill('# 实验报告\n\n已保存的桌面测试修改。');
+    task.status = 'working'; await signalState();
+    await page.locator('#task-status').filter({hasText: '更新产物中'}).waitFor({timeout: 2500});
+    assert.match(await page.locator('#markdown').inputValue(), /已保存的桌面测试修改/);
     await page.waitForFunction(() => document.getElementById('save-state').textContent === '已保存到本机');
     await new Promise(resolve => setTimeout(resolve, 1400));
     assert.equal(writes > 0, true);
@@ -101,25 +137,46 @@ const {promisify} = require('node:util');
     await page.locator('.brand').click();
     await page.locator('[data-nav="settings"]').click();
     await page.getByRole('heading', {name: '后台与连接', exact: true}).waitFor();
+    await page.locator('[name="poll_hours"]').fill('17');
+    health.learn.state = 'expired'; health.poll_hours = 24; await signalState();
+    await page.getByText('需要登录', {exact: true}).waitFor({timeout: 2500});
+    assert.equal(await page.locator('[name="poll_hours"]').inputValue(), '17');
+    health.learn.state = 'valid'; await signalState();
+    await page.getByText('登录有效', {exact: true}).waitFor({timeout: 2500});
     if (screenshotDir) await page.screenshot({path: path.join(screenshotDir, 'desktop-settings.png')});
     assert.equal(await page.evaluate(() => window.avatarDesktop.control('submit').then(() => false, () => true)), true);
+    health.cli[0].state = 'unavailable';
     const diagnostic = await page.evaluate(() => window.avatarDesktop.control('doctor').then(() => '', error => error.message));
     assert.match(diagnostic, /ENOENT/);
+    await page.getByText('不可用', {exact: true}).waitFor({timeout: 2500});
     await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].close());
     assert.equal(await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].isVisible()), false);
     await promisify(execFile)(executablePath || require('electron'), [...baseArgs, '--home', root, '--view', 'courses'], {env, timeout: 15000});
     await page.waitForURL('**/#view=courses');
     assert.equal(await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows().length), 1);
     assert.equal(await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].isVisible()), true);
+    await page.getByRole('heading', {name: '数字信号处理', exact: true}).waitFor();
+    // No file notification: returning to a hidden window must still refresh immediately.
+    await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].hide());
+    overview.courses[0].name = '课程状态已更新';
+    await promisify(execFile)(executablePath || require('electron'), [...baseArgs, '--home', root, '--view', 'courses'], {env, timeout: 15000});
+    await page.getByRole('heading', {name: '课程状态已更新', exact: true}).waitFor({timeout: 2500});
+    unavailable = true; await signalState();
+    await page.locator('#connection').filter({hasText: '连接中断'}).waitFor({timeout: 2500});
+    unavailable = false; await signalState();
+    await page.locator('#connection').filter({hasText: '本机后台运行中'}).waitFor({timeout: 2500});
     offline = true;
-    await page.reload();
-    await page.waitForURL(url => url.pathname === '/offline');
+    await signalState();
+    // A broken transport may consume the main process's three-second timeout.
+    await page.locator('#connection').filter({hasText: '连接中断'}).waitFor({timeout: 4500});
     offline = false;
-    await page.locator('#reconnect').click();
-    await page.waitForURL('**/#view=courses');
+    await signalState();
+    await page.locator('#connection').filter({hasText: '本机后台运行中'}).waitFor({timeout: 2500});
+    assert.equal(new URL(page.url()).hash, '#view=courses');
     assert.equal(unauthorized, 0);
     assert.deepEqual(errors, []);
-    console.log('Electron: window, internal navigation, authenticated bridge, PDF preview/download, report save, window recovery, single instance, and offline reconnection passed.');
+    console.log('Electron: live status updates, in-flight catch-up, wake refresh, draft preservation, reconnection, single window, PDF preview/download, and report save passed.');
+    console.log('Observed state update latency (ms): ' + stateLatencies.join(', '));
   } finally {
     if (electron) await electron.close();
     await new Promise(resolve => server.close(resolve));

@@ -40,7 +40,7 @@ async function backend(root, pathname, options = {}) {
   const headers = new Headers(options.headers);
   headers.set('Cookie', 'avatarthu_editor_' + ep.host.replaceAll(':', '_') + '=' + ep.token);
   headers.set('Origin', base);
-  return fetch(base + pathname, {...options, headers, redirect: 'error', signal: AbortSignal.timeout(25000)});
+  return fetch(base + pathname, {...options, headers, cache: 'no-store', redirect: 'error', signal: options.signal || AbortSignal.timeout(25000)});
 }
 function safeOutput(value) {
   return String(value).replace(/https?:\/\/\S+/g, '[链接已隐藏]').replace(/(?:Bearer\s+|sk-)[A-Za-z0-9_.-]+/g, '[凭证已隐藏]').slice(-4000);

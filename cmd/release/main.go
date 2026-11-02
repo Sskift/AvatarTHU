@@ -26,7 +26,7 @@ func must(err error) {
 }
 func main() {
 	dest := flag.String("out", "dist", "output directory")
-	version := flag.String("version", "0.3.0-alpha.1", "version without v")
+	version := flag.String("version", "0.3.0-alpha.2", "version without v")
 	targetOS := flag.String("os", runtime.GOOS, "target operating system")
 	targetArch := flag.String("arch", runtime.GOARCH, "target architecture")
 	cliOnly := flag.Bool("cli-only", false, "build only the native Go CLI")

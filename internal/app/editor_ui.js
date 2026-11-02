@@ -279,6 +279,9 @@ $('submit-final').onclick=async()=>{
  catch(e){$('submit-error').textContent=e.message;}finally{submitting=false;$('submit-final').disabled=false;updateStatus();}
 };
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+window.avatarDesktop?.onState?.(()=>poll());
+window.addEventListener('focus',()=>poll());
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 (async()=>{
  try{
   const params=new URLSearchParams(location.hash.slice(1)),token=params.get('token');

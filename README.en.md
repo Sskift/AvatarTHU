@@ -242,6 +242,8 @@ Run `avatarthu app` or click the menu bar seal to open the workspace directly. O
 
 The renderer uses `avatarthu://workspace`; only the Electron main process can authenticate to the loopback Go backend. School sign-in and explicitly selected external Feishu links use the system browser. Closing a window hides it; quitting the App leaves the Go scheduler running. Menu bar startup and backend service startup remain independent. Windows login startup is managed by the App.
 
+The menu bar and window share fresh state. The App watches atomic updates to local state files and pushes changes to the UI. Showing the window, waking the computer, or finishing a control action also refreshes immediately. A five-second local fallback check does not add school polling or model requests. Refreshes preserve unsaved settings, report drafts, and file filters. UI assets ship inside the App, allowing UI updates without interrupting jobs in the Go backend.
+
 The settings view includes service controls, CLI health checks, school login, keepalive checks and failed-task recovery. `avatarthu menubar start|stop|status` remains supported. `avatarthu web` is a compatibility alias for opening the App; `avatarthu edit ID` opens its report editor. `--no-open` remains only for compatibility and diagnostics.
 
 ## Choose writer and reviewer harnesses
