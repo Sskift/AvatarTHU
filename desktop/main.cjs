@@ -58,7 +58,7 @@ function createWindow() {
     width: 1280, height: 840, minWidth: 960, minHeight: 640, show: false,
     title: 'AvatarTHU', backgroundColor: '#f8f7f5', titleBarStyle: 'hiddenInset',
     ...(process.platform !== 'darwin' ? {titleBarOverlay: {color: '#f8f7f5', symbolColor: '#62576d', height: 40}} : {trafficLightPosition: {x: 20, y: 20}}),
-    webPreferences: {preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, spellcheck: false}
+    webPreferences: {preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, spellcheck: false, backgroundThrottling: false}
   });
   window.on('close', event => { if (!quitting) { event.preventDefault(); window.hide(); } });
   for (const event of ['show', 'focus', 'restore']) window.on(event, () => refresh());

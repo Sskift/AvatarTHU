@@ -474,6 +474,7 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			ensure(ok && hours >= 1.0/60 && hours <= 8760, "课程扫描间隔应为 1 分钟至 365 天")
 			a.configure([]string{"--writer", writer, "--reviewer", reviewer, "--poll-interval", strconv.FormatFloat(hours, 'f', -1, 64) + "h"})
 			a.wakeEditor()
+			a.wakeSync()
 			result = a.workspaceHealth()
 		case action == "scan" && r.Method == "POST":
 			defer a.lock("workspace-scan", true)()
@@ -482,7 +483,7 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 				m = M{"id": randomID(12), "state": "queued", "requested_at": stamp()}
 				writeJSON(a.data("workspace-scan.json"), m)
 			}
-			a.wakeEditor()
+			a.wakeSync()
 			result = m
 		default:
 			panic(fmt.Errorf("无效工作台请求"))

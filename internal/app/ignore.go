@@ -31,6 +31,7 @@ func (a *App) ignoreTask(tid, reason string) {
 func (a *App) restoreTask(tid string) {
 	path := a.taskPath(tid)
 	defer a.lock(tid, false)()
+	defer a.lock("course-materials", true)()
 	st := readMap(path)
 	ensure(len(st) > 0, "找不到这份作业")
 	if str(st, "status") != "ignored" {

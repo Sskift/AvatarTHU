@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,6 +38,12 @@ func syncFailureMessage(err error) string {
 func (a *App) syncCourses() {
 	s := a.school(true)
 	notices := a.sendNotices(s.announcements(), s.markRead)
+	a.syncSchoolAssignments(s, notices)
+}
+func (a *App) syncSchoolAssignments(s *School, notices int) {
+	// Only input copying shares this lock; a running writer/reviewer uses its
+	// own input directory and never holds up course downloads.
+	defer a.lock("course-materials", true)()
 	pending := s.assignments()
 	active := map[string]bool{}
 	oldTasks := a.tasks()
@@ -48,30 +56,26 @@ func (a *App) syncCourses() {
 			}
 		}
 		active[tid] = true
-		a.syncAssignment(tid, meta)
+		writeJSON(a.pendingSyncPath(tid), M{"meta": meta, "source_hash": materialsHash(meta)})
 	}
 	for _, old := range a.tasks() {
 		tid := str(old, "task_id")
 		if active[tid] {
 			continue
 		}
-		func() {
-			defer a.lock(tid, true)()
-			st := readMap(a.taskPath(tid))
-			switch str(st, "status") {
-			case "queued", "awaiting", "needs_student", "revision_ready", "working", "reviewing", "rewriting", "failed", "approval_invalid", "delivery_pending":
-				st["status"] = "closed_remote"
-				a.saveTask(st)
-			}
-		}()
+		writeJSON(a.pendingSyncPath(tid), M{"closed": true})
 	}
+	a.applySyncUpdates()
 	writeJSON(a.data("sync-result.json"), M{"time": stamp(), "pending": len(pending), "notices_sent": notices})
 	fmt.Printf("同步完成：%d 项待交作业，%d 条新公告\n", len(pending), notices)
 }
 func (a *App) syncAssignment(tid string, meta M) {
 	defer a.lock(tid, true)()
+	defer a.lock("course-materials", true)()
+	a.applySyncAssignment(tid, meta, materialsHash(meta))
+}
+func (a *App) applySyncAssignment(tid string, meta M, hash string) {
 	st := readMap(a.taskPath(tid))
-	hash := materialsHash(meta)
 	if len(st) == 0 {
 		merge(st, meta)
 		merge(st, M{"task_id": tid, "status": "queued", "revision": 1, "source_hash": hash})
@@ -88,49 +92,145 @@ func (a *App) syncAssignment(tid string, meta M) {
 	}
 	a.saveTask(st)
 }
+
+func (a *App) pendingSyncPath(tid string) string {
+	return a.data("sync-pending", filepath.Base(a.taskPath(tid)))
+}
+
+// Caller holds both the task and course-materials locks. Updates are durable
+// until applied, including when a model process outlives the network sync.
+func (a *App) applyTaskSync(tid string) {
+	p := a.pendingSyncPath(tid)
+	update := readMap(p)
+	if len(update) == 0 {
+		return
+	}
+	if boolean(update, "closed") {
+		st := readMap(a.taskPath(tid))
+		switch str(st, "status") {
+		case "queued", "awaiting", "needs_student", "revision_ready", "working", "reviewing", "rewriting", "failed", "approval_invalid", "delivery_pending":
+			st["status"] = "closed_remote"
+			a.saveTask(st)
+		}
+	} else {
+		a.applySyncAssignment(tid, obj(update, "meta"), str(update, "source_hash"))
+	}
+	check(os.Remove(p))
+}
+
+// Caller holds course-materials. Never wait for a task: all other courses and
+// assignments can become visible while a long-running task retains its state.
+func (a *App) applySyncUpdates() {
+	paths, err := filepath.Glob(a.data("sync-pending", "*.json"))
+	check(err)
+	for _, p := range paths {
+		tid := strings.TrimSuffix(filepath.Base(p), ".json")
+		if unlock, ok := a.tryLock(tid); ok {
+			func() { defer unlock(); a.applyTaskSync(tid) }()
+			a.wakeEditor()
+		}
+	}
+}
+
+func (a *App) wakeSync() {
+	if a.syncWake != nil {
+		select {
+		case a.syncWake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (a *App) syncScheduled(tick bool) bool {
+	unlock, ok := a.tryLock("course-sync")
+	if !ok {
+		return true
+	}
+	defer unlock()
+	func() {
+		defer a.lock("course-materials", true)()
+		a.applySyncUpdates()
+	}()
+	schedule := readMap(a.data("schedule.json"))
+	var scan M
+	func() {
+		defer a.lock("workspace-scan", true)()
+		scan = readMap(a.data("workspace-scan.json"))
+		requested := str(scan, "state") == "queued" || str(scan, "state") == "running"
+		if tick && !requested && time.Now().Before(a.nextScan(schedule)) {
+			scan = nil
+			return
+		}
+		if !requested {
+			scan = M{"id": randomID(12), "requested_at": stamp()}
+		}
+		merge(scan, M{"state": "running", "started_at": stamp()})
+		delete(scan, "error")
+		writeJSON(a.data("workspace-scan.json"), scan)
+	}()
+	if scan == nil {
+		return true
+	}
+	e := attempt(a.syncCourses)
+	merge(scan, M{"state": "completed", "completed_at": stamp()})
+	if e == nil {
+		writeJSON(a.data("schedule.json"), M{"last_sync_at": stamp()})
+	} else {
+		merge(scan, M{"state": "error", "error": safeError(e)})
+		schedule["next_sync_retry_at"] = time.Now().Add(15 * time.Minute).Format(time.RFC3339)
+		writeJSON(a.data("schedule.json"), schedule)
+		fmt.Fprintln(os.Stderr, stamp(), "网络学堂同步失败："+safeError(e))
+	}
+	func() {
+		defer a.lock("workspace-scan", true)()
+		writeJSON(a.data("workspace-scan.json"), scan)
+	}()
+	a.wakeEditor()
+	if e != nil && a.Ctx.Err() == nil {
+		_ = attempt(func() {
+			a.notifyOnce("sync-error:"+time.Now().In(beijing).Format("2006-01-02")+":"+fingerprint(e.Error()), syncFailureMessage(e))
+		})
+	}
+	return e == nil
+}
+
+func (a *App) syncLoop(ctx context.Context) {
+	timer := time.NewTicker(5 * time.Second)
+	defer timer.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if e := attempt(func() { a.syncScheduled(true) }); e != nil {
+			fmt.Fprintln(os.Stderr, "课程同步稍后重试："+safeError(e))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		case <-a.syncWake:
+		}
+	}
+}
+
 func (a *App) run(tick, syncOnly bool, selected string) bool {
-	defer a.lock("daily", false)()
+	if !syncOnly {
+		defer a.lock("daily", false)()
+	}
 	ctx, cancel := context.WithCancel(a.Ctx)
 	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); a.maintenanceLoop(ctx) }()
 	defer func() { cancel(); wg.Wait() }()
-	if !syncOnly {
-		a.processEditorRequests(selected)
+	if syncOnly {
+		return a.syncScheduled(tick)
 	}
 	success := true
-	schedule := readMap(a.data("schedule.json"))
-	manualScan := readMap(a.data("workspace-scan.json"))
-	requested := str(manualScan, "state") == "queued" || str(manualScan, "state") == "running"
-	if !tick || requested || !time.Now().Before(a.nextScan(schedule)) {
-		if requested {
-			manualScan["state"] = "running"
-			writeJSON(a.data("workspace-scan.json"), manualScan)
-		}
-		e := attempt(func() { defer a.stage("课程同步", 30*time.Minute)(); a.syncCourses() })
-		if requested {
-			merge(manualScan, M{"state": "completed", "completed_at": stamp()})
-			if e != nil {
-				merge(manualScan, M{"state": "error", "error": safeError(e)})
-			}
-			writeJSON(a.data("workspace-scan.json"), manualScan)
-		}
-		if e == nil {
-			writeJSON(a.data("schedule.json"), M{"last_sync_at": stamp()})
-		} else {
-			success = false
-			schedule["next_sync_retry_at"] = time.Now().Add(15 * time.Minute).Format(time.RFC3339)
-			writeJSON(a.data("schedule.json"), schedule)
-			fmt.Fprintln(os.Stderr, stamp(), "网络学堂同步失败："+safeError(e))
-			_ = attempt(func() {
-				a.notifyOnce("sync-error:"+time.Now().In(beijing).Format("2006-01-02")+":"+fingerprint(e.Error()), syncFailureMessage(e))
-			})
-		}
+	if a.syncWake == nil {
+		success = a.syncScheduled(tick)
 	}
-	if syncOnly {
-		return success
-	}
+	a.processEditorRequests(selected)
 	for _, old := range a.tasks() {
 		if a.Ctx.Err() != nil {
 			return false
@@ -141,7 +241,12 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 		}
 		func() {
 			defer a.stage("作业处理", 30*time.Minute)()
+			defer a.wakeSync()
 			defer a.lock(tid, true)()
+			func() {
+				defer a.lock("course-materials", true)()
+				a.applyTaskSync(tid)
+			}()
 			st := readMap(a.taskPath(tid))
 			status := str(st, "status")
 			if status == "awaiting" || status == "needs_student" {
@@ -265,14 +370,16 @@ func (a *App) daemon() {
 	ctx, cancel := context.WithCancel(a.Ctx)
 	defer cancel()
 	a.editorWake = make(chan struct{}, 1)
+	a.syncWake = make(chan struct{}, 1)
 	defer a.startEditor(ctx)()
 	var workers sync.WaitGroup
 	a.monitor = &daemonMonitor{app: a, phase: "等待调度", started: time.Now(), deadline: time.Now().Add(3 * time.Minute)}
 	a.monitor.beat()
-	workers.Add(3)
+	workers.Add(4)
 	go func() { defer workers.Done(); a.monitor.loop(ctx) }()
 	go func() { defer workers.Done(); a.eventManager(ctx) }()
 	go func() { defer workers.Done(); a.maintenanceLoop(ctx) }()
+	go func() { defer workers.Done(); a.syncLoop(ctx) }()
 	defer func() {
 		cancel()
 		workers.Wait()

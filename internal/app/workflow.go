@@ -80,6 +80,13 @@ func extractDocument(src, dst string) {
 	}
 }
 func (a *App) prepare(st M, job string) {
+	defer a.lock("course-materials", true)()
+	// A sync may have completed after the scheduler took the task lock. Never
+	// create a mixed input version; the durable update is applied on release.
+	if tid, hash := str(st, "task_id"), str(st, "source_hash"); tid != "" && hash != "" {
+		update := readMap(a.pendingSyncPath(tid))
+		ensure(!boolean(update, "closed") && (len(update) == 0 || str(update, "source_hash") == hash) && materialsHash(st) == hash, "课程材料已更新，正在切换到最新版本")
+	}
 	writeFile(filepath.Join(job, "input", "assignment.md"), []byte(str(st, "description")), 0600)
 	for name, source := range map[string]string{"attachments": str(st, "folder"), "courseware": str(st, "courseware")} {
 		dest := filepath.Join(job, "input", name)

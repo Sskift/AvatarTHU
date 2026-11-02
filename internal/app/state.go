@@ -22,7 +22,7 @@ import (
 
 type M = map[string]any
 
-var Version = "0.3.0-alpha.2"
+var Version = "0.3.0-alpha.3"
 var beijing = time.FixedZone("Asia/Shanghai", 8*3600)
 
 type App struct {
@@ -35,6 +35,7 @@ type App struct {
 	CallLark   func([]string) M
 	monitor    *daemonMonitor
 	editorWake chan struct{}
+	syncWake   chan struct{}
 }
 
 func New(ctx context.Context, root string) *App {
@@ -101,6 +102,17 @@ func (a *App) tasks() []M {
 }
 func (a *App) lock(name string, blocking bool) func() {
 	return fileLock(a.data("locks", name+".lock"), blocking)
+}
+func (a *App) tryLock(name string) (func(), bool) {
+	p := a.data("locks", name+".lock")
+	mkdir(filepath.Dir(p))
+	l := flock.New(p)
+	ok, err := l.TryLock()
+	check(err)
+	if !ok {
+		return nil, false
+	}
+	return func() { check(l.Unlock()) }, true
 }
 func fileLock(p string, block bool) func() {
 	mkdir(filepath.Dir(p))

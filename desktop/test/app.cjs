@@ -15,7 +15,7 @@ const {promisify} = require('node:util');
   const health = {daemon: {state: 'running', phase: '等待调度'}, learn: {state: 'valid'}, lark: {enabled: false}, cli: [{tool: 'codex', state: 'ready', required: true}, {tool: 'claude', state: 'unknown', required: false}], writer: 'codex', reviewer: 'codex', poll_hours: 12, scan: {}, version: 'desktop-fixture'};
   const overview = {courses: [{id: 'course1', name: '数字信号处理', semester: '2026-2027-1', tasks: 1}, {id: 'course2', name: '计算机图形学基础', semester: '2026-2027-1', tasks: 0}], tasks: [task], health};
   const draft = {version: 1, base_revision: 1, markdown: '# 实验报告\n\n这是独立的桌面测试材料。', base_markdown: '# 实验报告\n\n这是独立的桌面测试材料。'};
-  let writes = 0, unauthorized = 0, offline = false, unavailable = false, electron;
+  let writes = 0, syncs = 0, unauthorized = 0, offline = false, unavailable = false, electron;
   let heldOverview, holdNextOverview = false, overviewWaiting;
   const signalState = async () => {
     const file = path.join(root, 'data/tasks', taskID + '.json');
@@ -53,6 +53,10 @@ const {promisify} = require('node:util');
         return json(overview);
       }
       if (url.pathname === '/api/workspace/health') return json(health);
+      if (url.pathname === '/api/workspace/scan') {
+        syncs++; health.scan = {id: 'manual-sync', state: 'queued'};
+        await signalState(); return json(health.scan);
+      }
       if (url.pathname === '/api/workspace/files') return json([material]);
       if (url.pathname === '/api/workspace/preview') return json({kind: 'pdf'});
       if (url.pathname === '/api/workspace/file') {
@@ -93,6 +97,20 @@ const {promisify} = require('node:util');
     task.status = 'working'; await signalState();
     await page.getByRole('link', {name: /Lab 1.*正在撰写/}).waitFor({timeout: 2500});
     stateLatencies.push(Math.round(performance.now() - changedAt)); changedAt = performance.now();
+    assert.equal(await page.getByRole('button', {name: '刷新', exact: true}).count(), 0);
+    await page.getByRole('button', {name: '同步课程', exact: true}).click();
+    await page.getByRole('button', {name: '正在连接学堂…', exact: true}).waitFor();
+    assert.equal(await page.locator('#scan').isDisabled(), true);
+    assert.equal(syncs, 1);
+    health.scan.state = 'running'; await signalState();
+    await page.getByRole('button', {name: '正在同步…', exact: true}).waitFor({timeout: 2500});
+    assert.equal(task.status, 'working');
+    health.scan.state = 'completed'; health.scan.completed_at = new Date().toISOString();
+    overview.courses.push({id: 'synced-course', name: '同步发现的课程', semester: '2026-2027-1', tasks: 0});
+    await signalState();
+    await page.getByRole('button', {name: '同步课程', exact: true}).waitFor({timeout: 2500});
+    await page.getByRole('heading', {name: '同步发现的课程', exact: true}).waitFor({timeout: 2500});
+    changedAt = performance.now();
     task.status = 'reviewing'; await signalState();
     await page.getByRole('link', {name: /Lab 1.*独立复审中/}).waitFor({timeout: 2500});
     stateLatencies.push(Math.round(performance.now() - changedAt));
@@ -151,6 +169,10 @@ const {promisify} = require('node:util');
     await page.getByText('不可用', {exact: true}).waitFor({timeout: 2500});
     await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].close());
     assert.equal(await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows()[0].isVisible()), false);
+    health.learn.state = 'expired'; await signalState();
+    await page.getByText('需要登录', {exact: true}).waitFor({timeout: 2500});
+    health.learn.state = 'valid'; await signalState();
+    await page.getByText('登录有效', {exact: true}).waitFor({timeout: 2500});
     await promisify(execFile)(executablePath || require('electron'), [...baseArgs, '--home', root, '--view', 'courses'], {env, timeout: 15000});
     await page.waitForURL('**/#view=courses');
     assert.equal(await electron.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows().length), 1);
@@ -175,7 +197,7 @@ const {promisify} = require('node:util');
     assert.equal(new URL(page.url()).hash, '#view=courses');
     assert.equal(unauthorized, 0);
     assert.deepEqual(errors, []);
-    console.log('Electron: live status updates, in-flight catch-up, wake refresh, draft preservation, reconnection, single window, PDF preview/download, and report save passed.');
+    console.log('Electron: unified course sync during writing, visible/hidden status updates, in-flight catch-up, wake refresh, draft preservation, reconnection, single window, PDF preview/download, and report save passed.');
     console.log('Observed state update latency (ms): ' + stateLatencies.join(', '));
   } finally {
     if (electron) await electron.close();

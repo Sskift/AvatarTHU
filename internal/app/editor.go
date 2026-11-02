@@ -322,7 +322,7 @@ func (a *App) processEditorRequests(selected string) {
 				job := filepath.Join(filepath.Dir(p), fmt.Sprintf("job-attempt-%d", number(r, "attempt", 1)))
 				r["job"] = job
 				mkdir(job)
-				a.prepare(M{"description": st["description"], "folder": st["folder"], "courseware": st["courseware"]}, job)
+				a.prepare(M{"task_id": tid, "source_hash": st["source_hash"], "description": st["description"], "deadline": st["deadline"], "requirements_hash": st["requirements_hash"], "folder": st["folder"], "courseware": st["courseware"]}, job)
 				for _, artifact := range objects(st["artifacts"]) {
 					source := str(artifact, "path")
 					copyFile(source, filepath.Join(job, "current-artifacts", filepath.Base(source)))
