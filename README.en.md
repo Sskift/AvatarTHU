@@ -244,6 +244,8 @@ The renderer uses `avatarthu://workspace`; only the Electron main process can au
 
 The menu bar and window share fresh state. The App watches atomic updates to local state files and pushes changes to the UI. Showing the window, waking the computer, or finishing a control action also refreshes immediately. A five-second local fallback check does not add school polling or model requests. Refreshes preserve unsaved settings, report drafts, and file filters. UI assets ship inside the App, allowing UI updates without interrupting jobs in the Go backend.
 
+The toolbar has one **Sync courses** action. It immediately connects to Web Learning, synchronizes courses, materials, announcements, and assignments, and updates the window when finished. Local status refreshes automatically. Course synchronization runs independently of writing, review, and local edits; repeated requests share the active synchronization. A running assignment keeps its input snapshot. Material changes and remote closures are saved durably and applied when that assignment releases its lock, while other courses and assignments update normally.
+
 The settings view includes service controls, CLI health checks, school login, keepalive checks and failed-task recovery. `avatarthu menubar start|stop|status` remains supported. `avatarthu web` is a compatibility alias for opening the App; `avatarthu edit ID` opens its report editor. `--no-open` remains only for compatibility and diagnostics.
 
 ## Choose writer and reviewer harnesses
@@ -310,7 +312,7 @@ Run `avatarthu app` or click the menu bar seal. The App connects internally to t
 2. **Courses:** Browse by semester and course, with separate views for assignments, materials, announcements, and outputs. Upload supplementary materials to the course's `courseware/user/` folder; subsequent scans detect material changes.
 3. **Files:** Search names and paths across courses, filter by course or type, preview PDFs, images, text, HTML, and ZIP contents, and download files. Rename or remove your uploaded materials; removed files remain recoverable in `data/workspace-trash/`.
 4. **Deliverables:** Browse current and historical artifacts alongside every independent review. Open the report editor for direct edits, multi-paragraph feedback, and final-manuscript handoff to update related artifacts. School submission still requires confirmation on the current Feishu card.
-5. **Settings and status:** Select writer and reviewer independently, adjust course polling, or queue an immediate scan. Existing work retains its execution plan, and keepalive stays at 10-minute intervals.
+5. **Settings and status:** Select writer and reviewer independently, adjust course polling, and inspect the latest synchronization result. **Sync courses** starts independent synchronization immediately. Existing work retains its execution plan, and keepalive stays at 10-minute intervals.
 
 The App starts the installed backend and reconnects after restarts. Existing local bookmarks remain compatible, but normal access is through the App or menu bar. Feishu remains the cross-device entry point.
 
