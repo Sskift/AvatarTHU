@@ -159,8 +159,11 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 			switch str(event, "type") {
 			case "turn.completed":
 				completed = true
-			case "turn.failed", "error":
+			case "turn.failed":
 				failed = true
+			case "turn.started", "error":
+				// Reconnection errors can recover before a later completion.
+				completed = false
 			}
 		}
 		check(scanner.Err())

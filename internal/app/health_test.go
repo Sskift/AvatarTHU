@@ -10,8 +10,12 @@ import (
 	"time"
 )
 
-// The test executable doubles as a native event CLI on macOS and Windows.
+// The test executable doubles as native CLI fixtures on macOS and Windows.
 func TestMain(m *testing.M) {
+	if os.Getenv("CODEX_ENGINE_TEST_CLI") == "1" {
+		runCodexEngineTestCLI()
+		return
+	}
 	if mode := os.Getenv("AVATARTHU_TEST_EVENT_CLI"); mode != "" {
 		if !strings.Contains(strings.Join(os.Args, " "), "--profile example") {
 			os.Exit(3)
