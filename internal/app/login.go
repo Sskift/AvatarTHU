@@ -12,15 +12,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/net/html"
 )
 
 func parseMap(b []byte) M {
@@ -107,6 +111,66 @@ func findChrome() string {
 	}
 	return ""
 }
+
+// Follow only the school's published SSO entry, never a credential form action.
+func schoolLoginURL(page string) string {
+	for _, n := range nodes(parseHTML(page), func(n *html.Node) bool { return attr(n, "id") == "loginButtonId" }) {
+		match := regexp.MustCompile(`^\s*window\.location\.href\s*=\s*['"]([^'"]+)['"]\s*;?\s*$`).FindStringSubmatch(attr(n, "onclick"))
+		if len(match) != 2 {
+			continue
+		}
+		u, err := url.Parse(match[1])
+		if err == nil && u.Scheme == "https" && u.Host == "id.tsinghua.edu.cn" && u.User == nil && strings.HasPrefix(u.Path, "/do/off/ui/auth/login/form/") {
+			return u.String()
+		}
+	}
+	panic(fmt.Errorf("网络学堂登录入口已改变，请运行 avatarthu login thu"))
+}
+
+func (a *App) schoolLoginURL() string {
+	s := a.schoolFrom(M{})
+	s.HTTP.Timeout = 15 * time.Second
+	r := s.request("GET", "/f/login", nil, nil, "", false)
+	defer r.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	check(err)
+	return schoolLoginURL(string(b))
+}
+
+func schoolLoginTarget(target M) bool {
+	u, err := url.Parse(str(target, "url"))
+	if err != nil || str(target, "type") != "page" || u.Host != "learn.tsinghua.edu.cn" {
+		return false
+	}
+	return u.Path == "/f/login" || strings.Contains(u.Path, "login_timeout") || str(target, "title") == "登录超时"
+}
+
+// A clean browser exit does not retain session-only cookies. Restore missing
+// school cookies from the validated native session without replacing newer ones.
+func missingBrowserCookies(saved, current []M) []M {
+	key := func(c M) string { return str(c, "domain") + "|" + strDefault(c, "path", "/") + "|" + str(c, "name") }
+	seen := map[string]bool{}
+	for _, c := range current {
+		seen[key(c)] = true
+	}
+	missing := []M{}
+	for _, c := range saved {
+		if !schoolDomain(str(c, "domain")) || seen[key(c)] || str(c, "name") == "" {
+			continue
+		}
+		cookie := M{"name": c["name"], "value": c["value"], "domain": c["domain"], "path": strDefault(c, "path", "/"), "secure": boolean(c, "secure"), "httpOnly": boolean(c, "httpOnly")}
+		if expires := number(c, "expires", 0); expires > 0 {
+			if int64(expires) <= time.Now().Unix() {
+				continue
+			}
+			cookie["expires"] = expires
+		}
+		missing = append(missing, cookie)
+		seen[key(c)] = true
+	}
+	return missing
+}
+
 func (a *App) browserLogin(headless bool) []M {
 	exe := findChrome()
 	ensure(exe != "", "未找到 Chrome（Windows 也支持 Edge）。请安装浏览器或设置 AVATARTHU_CHROME 为程序路径")
@@ -123,24 +187,45 @@ func (a *App) browserLogin(headless bool) []M {
 	}
 	ctx, cancel := context.WithTimeout(a.Ctx, timeout)
 	defer cancel()
+	loginApp := *a
+	loginApp.Ctx = ctx
 	args := []string{exe, "--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", "--user-data-dir=" + profile, "--no-first-run", "--no-default-browser-check", "--disable-save-password-bubble", "--password-store=basic"}
 	page := "https://learn.tsinghua.edu.cn/f/login"
 	if headless {
 		args = append(args, "--headless=new")
-		page = "https://learn.tsinghua.edu.cn/f/wlxt/index/course/student/"
+		page = "about:blank"
 	}
 	args = append(args, page)
-	cmd := command(ctx, args...)
+	// The loop observes ctx; let cleanup ask Chrome to flush its profile before
+	// using the forced process-group fallback, including on timeout/cancellation.
+	cmd := command(context.WithoutCancel(ctx), args...)
 	cmd.Dir = a.Root
 	check(cmd.Start())
 	cleanup := bindProcess(cmd)
-	defer func() { cleanup(); _ = cmd.Wait() }()
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	var conn *websocket.Conn
+	defer func() {
+		if conn != nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+			_ = conn.WriteJSON(M{"id": 0, "method": "Browser.close"})
+			defer conn.Close()
+		}
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			cleanup()
+			<-done
+		}
+	}()
 	if !headless {
 		fmt.Println("已打开 AvatarTHU 登录窗口，请完成网络学堂登录及双因素验证。")
 	}
 	var address string
 	for address == "" {
 		select {
+		case <-done:
+			panic(fmt.Errorf("登录浏览器已退出，请重新运行 avatarthu login thu"))
 		case <-ctx.Done():
 			panic(fmt.Errorf("浏览器启动超时，请检查浏览器是否可用"))
 		case <-time.After(300 * time.Millisecond):
@@ -156,14 +241,14 @@ func (a *App) browserLogin(headless bool) []M {
 			}
 		}
 	}
-	conn, _, e := websocket.DefaultDialer.DialContext(ctx, address, http.Header{})
+	var e error
+	conn, _, e = websocket.DefaultDialer.DialContext(ctx, address, http.Header{})
 	check(e)
-	defer conn.Close()
 	id := 0
-	call := func(method string) M {
+	call := func(method string, params M) M {
 		id++
 		check(conn.SetWriteDeadline(time.Now().Add(5 * time.Second)))
-		check(conn.WriteJSON(M{"id": id, "method": method, "params": M{}}))
+		check(conn.WriteJSON(M{"id": id, "method": method, "params": params}))
 		for {
 			check(conn.SetReadDeadline(time.Now().Add(5 * time.Second)))
 			var v M
@@ -174,12 +259,22 @@ func (a *App) browserLogin(headless bool) []M {
 			}
 		}
 	}
+	if headless {
+		current := objects(call("Storage.getCookies", M{})["cookies"])
+		if missing := missingBrowserCookies(objects(readMap(a.session())["all_cookies"]), current); len(missing) > 0 {
+			call("Storage.setCookies", M{"cookies": missing})
+		}
+		call("Target.createTarget", M{"url": schoolBase + "/f/wlxt/index/course/student/"})
+	}
+	ssoStarted := false
 	for {
 		select {
+		case <-done:
+			panic(fmt.Errorf("登录窗口已关闭，网络学堂登录尚未完成"))
 		case <-ctx.Done():
 			panic(fmt.Errorf("网络学堂登录尚未完成，请重新运行 avatarthu login thu"))
 		case <-time.After(1500 * time.Millisecond):
-			v := call("Storage.getCookies")
+			v := call("Storage.getCookies", M{})
 			cookies := []M{}
 			names := map[string]bool{}
 			for _, c := range objects(v["cookies"]) {
@@ -191,8 +286,17 @@ func (a *App) browserLogin(headless bool) []M {
 				}
 			}
 			if names["JSESSIONID"] && names["XSRF-TOKEN"] {
-				if e := attempt(func() { a.saveSession(cookies) }); e == nil {
+				if e := attempt(func() { loginApp.saveSession(cookies) }); e == nil {
 					return cookies
+				}
+			}
+			if headless && !ssoStarted {
+				for _, target := range objects(call("Target.getTargets", M{})["targetInfos"]) {
+					if schoolLoginTarget(target) {
+						call("Target.createTarget", M{"url": loginApp.schoolLoginURL()})
+						ssoStarted = true
+						break
+					}
 				}
 			}
 		}
@@ -214,24 +318,15 @@ func (a *App) keepalive(force, recoverLogin bool) M {
 	defer a.lock("keepalive", true)()
 	p := filepath.Join(filepath.Dir(a.session()), "keepalive-status.json")
 	state := readMap(p)
-	if !force && time.Since(parseTime(str(state, "checked_at"))) < 10*time.Minute {
+	if !force && time.Since(parseTime(str(state, "checked_at"))) < keepaliveInterval(state) {
 		return state
 	}
 	state["checked_at"] = stamp()
 	state["process_id"] = os.Getpid()
-	state["interval_seconds"] = 600
 	err := attempt(func() {
 		s := a.school(false)
-		e := attempt(func() { s.semester() })
-		if e != nil {
-			if _, ok := e.(sessionExpired); !ok {
-				panic(e)
-			}
-			s.warmup()
-			s.semester()
-		}
-		s.courses()
-		s.persist()
+		s.HTTP.Timeout = 25 * time.Second
+		refreshSchoolSession(s)
 	})
 	recovered := false
 	if err != nil && recoverLogin {
@@ -251,12 +346,31 @@ func (a *App) keepalive(force, recoverLogin bool) M {
 	state["recovered"] = recovered
 	if err == nil {
 		delete(state, "recovery_errors")
+		delete(state, "chrome_attempt_at")
 		merge(state, M{"state": "valid", "last_success": stamp(), "message": "登录有效，已保活并保存更新后的会话"})
 	} else if _, expired := err.(sessionExpired); expired {
 		merge(state, M{"state": "expired", "message": "网络学堂需要重新认证，请运行 avatarthu login thu"})
 	} else {
 		merge(state, M{"state": "unavailable", "message": "暂时无法验证登录，保留原会话，下次重试：" + safeError(err)})
 	}
+	state["checked_at"] = stamp()
+	state["interval_seconds"] = int(keepaliveInterval(state).Seconds())
 	writeJSON(p, state)
 	return state
+}
+
+func keepaliveInterval(state M) time.Duration {
+	if str(state, "state") == "unavailable" {
+		return time.Minute
+	}
+	return 10 * time.Minute
+}
+
+func refreshSchoolSession(s *School) {
+	// The web entry also refreshes the gateway session; API-only traffic does not
+	// necessarily touch it. Persist only after authenticated course access succeeds.
+	s.warmup()
+	s.semester()
+	s.courses()
+	s.persist()
 }

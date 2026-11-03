@@ -62,9 +62,12 @@ func (j *schoolJar) SetCookies(u *url.URL, cs []*http.Cookie) {
 			v.Path = "/"
 		}
 		k := v.Domain + "|" + v.Path + "|" + v.Name
-		if v.MaxAge < 0 || (!v.Expires.IsZero() && v.Expires.Before(time.Now())) {
+		if v.MaxAge < 0 || (v.MaxAge == 0 && !v.Expires.IsZero() && v.Expires.Before(time.Now())) {
 			delete(j.records, k)
 		} else {
+			if v.MaxAge > 0 {
+				v.Expires = time.Now().Add(time.Duration(v.MaxAge) * time.Second)
+			}
 			j.records[k] = &v
 		}
 	}
@@ -78,6 +81,9 @@ func (j *schoolJar) load(m M) {
 		u, e := url.Parse("https://" + strings.TrimPrefix(dom, "."))
 		check(e)
 		cookie := &http.Cookie{Name: str(c, "name"), Value: str(c, "value"), Domain: dom, Path: strDefault(c, "path", "/"), Secure: boolean(c, "secure"), HttpOnly: boolean(c, "httpOnly")}
+		if expires := number(c, "expires", 0); expires > 0 {
+			cookie.Expires = time.Unix(int64(expires), 0)
+		}
 		j.SetCookies(u, []*http.Cookie{cookie})
 	}
 	if len(j.records) == 0 {
@@ -98,7 +104,14 @@ func (j *schoolJar) snapshot() []M {
 	defer j.mu.Unlock()
 	r := []M{}
 	for _, c := range j.records {
-		r = append(r, M{"name": c.Name, "value": c.Value, "domain": c.Domain, "path": c.Path, "secure": c.Secure, "httpOnly": c.HttpOnly})
+		cookie := M{"name": c.Name, "value": c.Value, "domain": c.Domain, "path": c.Path, "secure": c.Secure, "httpOnly": c.HttpOnly}
+		if !c.Expires.IsZero() {
+			if !c.Expires.After(time.Now()) {
+				continue
+			}
+			cookie["expires"] = c.Expires.Unix()
+		}
+		r = append(r, cookie)
 	}
 	return r
 }
