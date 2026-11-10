@@ -189,7 +189,9 @@ func (a *App) serviceStart() {
 	ensure(exists(a.installedBinary()), "请先运行 avatarthu init 安装命令")
 	a.retireLegacy()
 	if a.serviceLoaded() {
-		a.startMenubarIfEnabled()
+		if !boolean(a.config(), "keepalive_only") {
+			a.startMenubarIfEnabled()
+		}
 		fmt.Println("后台 loop 已在运行，通知设置在 15 秒内生效。")
 		return
 	}
@@ -217,8 +219,12 @@ func (a *App) serviceStart() {
 	default:
 		panic(fmt.Errorf("此系统请使用 avatarthu daemon 在前台运行"))
 	}
-	a.startMenubarIfEnabled()
-	fmt.Println("后台 loop 已启动。10 分钟保活，课程扫描按配置执行，退出终端后继续运行；登录系统自动启动，休眠唤醒后补查。")
+	if boolean(a.config(), "keepalive_only") {
+		fmt.Println("独立保活后台已启动。每 10 分钟保活；登录系统自动启动，不运行课程扫描、作业处理或飞书监听。")
+	} else {
+		a.startMenubarIfEnabled()
+		fmt.Println("后台 loop 已启动。10 分钟保活，课程扫描按配置执行，退出终端后继续运行；登录系统自动启动，休眠唤醒后补查。")
+	}
 }
 func systemdQuote(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%").Replace(s) + `"`
