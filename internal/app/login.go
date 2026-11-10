@@ -39,6 +39,9 @@ func (a *App) saveSession(cookies []M) {
 	s.courses()
 	defer fileLock(a.session()+".lock", true)()
 	writeJSON(a.session(), M{"all_cookies": s.Jar.snapshot()})
+	if str(obj(a.config(), "keepalive_remote"), "host") != "" {
+		writeJSON(a.remoteLoginPendingPath(), M{"id": randomID(16)})
+	}
 }
 func (a *App) importChrome() []M {
 	ensure(runtime.GOOS == "darwin", "Chrome 会话导入仅适用于 macOS；Windows 请使用登录窗口")
@@ -311,8 +314,11 @@ func (a *App) loginTHU(importOnly bool) {
 		fmt.Println("现有 Chrome 会话不可用，打开本项目内置的浏览器登录入口。")
 		a.browserLogin(false)
 	}
-	a.keepalive(true, false)
+	state := a.keepalive(true, false)
 	fmt.Println("登录成功，会话已保存：" + a.session())
+	if str(state, "remote_error") != "" {
+		fmt.Println("远端会话暂未更新，已保存同步请求；连接恢复后自动同步。")
+	}
 }
 func (a *App) keepalive(force, recoverLogin bool) M {
 	defer a.lock("keepalive", true)()
@@ -321,6 +327,37 @@ func (a *App) keepalive(force, recoverLogin bool) M {
 	if !force && time.Since(parseTime(str(state, "checked_at"))) < keepaliveInterval(state) {
 		return state
 	}
+	if str(obj(a.config(), "keepalive_remote"), "host") != "" {
+		if err := attempt(func() { state = a.remoteKeepalive(force) }); err == nil {
+			if str(state, "state") == "expired" && recoverLogin {
+				local := a.localKeepalive(true, true)
+				if str(local, "state") == "valid" {
+					state = local
+					state["remote_error"] = "远端登录需更新，已恢复本机会话；稍后自动同步"
+					state["interval_seconds"] = int(keepaliveInterval(state).Seconds())
+				}
+			}
+			writeJSON(p, state)
+			return state
+		}
+		state = a.localKeepalive(force, recoverLogin)
+		state["remote_error"] = "远端保活暂不可达，已尝试本机会话；稍后自动重连"
+		state["interval_seconds"] = int(keepaliveInterval(state).Seconds())
+		writeJSON(p, state)
+		return state
+	}
+	return a.localKeepalive(force, recoverLogin)
+}
+
+// Caller holds the keepalive lock, including when serving an SSH exchange.
+func (a *App) localKeepalive(force, recoverLogin bool) M {
+	p := filepath.Join(filepath.Dir(a.session()), "keepalive-status.json")
+	state := readMap(p)
+	if !force && time.Since(parseTime(str(state, "checked_at"))) < keepaliveInterval(state) {
+		return state
+	}
+	delete(state, "remote_error")
+	delete(state, "source")
 	state["checked_at"] = stamp()
 	state["process_id"] = os.Getpid()
 	err := attempt(func() {
@@ -360,7 +397,7 @@ func (a *App) keepalive(force, recoverLogin bool) M {
 }
 
 func keepaliveInterval(state M) time.Duration {
-	if str(state, "state") == "unavailable" {
+	if str(state, "state") == "unavailable" || str(state, "remote_error") != "" {
 		return time.Minute
 	}
 	return 10 * time.Minute

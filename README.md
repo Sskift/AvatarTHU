@@ -232,6 +232,32 @@ avatarthu keepalive status
 
 `service start` 不重复启动已运行的进程。`service stop` 停止调度、保活和飞书监听；保留所有数据。`avatarthu daemon` 可以直接在前台运行。
 
+### 在常开电脑保活
+
+可以让另一台常开电脑运行 Go 保活进程，本机仍负责 App、课程同步和作业。两台电脑安装相同版本的原生程序；先确认本机能够通过已有 SSH 配置免交互连接远端，且已验证并保存其主机密钥。
+
+在常开电脑上配置并启动：
+
+```sh
+avatarthu configure --keepalive-only
+avatarthu service start
+```
+
+在本机设置远端 SSH 主机和原生程序路径，然后立即检查：
+
+```sh
+avatarthu configure --keepalive-host home --keepalive-binary C:/Users/skift/.avatarthu/bin/avatarthu.exe
+avatarthu keepalive run
+```
+
+程序路径不能包含空格或 shell 字符。远端 Windows 数据保存在 `%USERPROFILE%\.avatarthu`，任务计划程序使用当前已登录用户，无需保存 Windows 密码。独立模式不启动课程扫描、作业执行、飞书监听或工作台。也可用 `avatarthu daemon --keepalive-only` 前台运行。
+
+远端每 10 分钟验证网页入口和课程接口并保存更新后的会话。本机在保活或课程访问前按间隔通过 SSH 获取最新 Cookie；本机睡眠或关机不影响远端。传输走 SSH，不另开网络监听端口。第一次运行时，如果远端尚未登录，会验证并接收本机现有会话；普通同步不会用本机旧会话覆盖远端的有效会话。
+
+需要本人认证时，仍在本机运行 `avatarthu login thu`。登录成功后自动把新会话交给远端；如果远端暂不可达，同步请求会保存在本机，连接恢复后重试。远端不可达时，本机继续尝试本地保活并在状态中记录 `remote_error`。学校强制重新认证仍需本人完成；常开保活不能保证永久免登录。
+
+`avatarthu keepalive status` 的 `source` 为 `ssh:home` 时表示最近一次使用了远端会话。关闭远端保活使用 `avatarthu configure --keepalive-host ''`；远端用 `avatarthu service stop` 停止。更改独立模式后需重启对应后台进程。
+
 <a id="macos-menubar"></a>
 
 ## 桌面 App 与菜单栏

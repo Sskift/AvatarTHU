@@ -126,6 +126,9 @@ type School struct {
 }
 
 func (a *App) school(warm bool) *School {
+	if warm && str(obj(a.config(), "keepalive_remote"), "host") != "" {
+		a.keepalive(false, false)
+	}
 	s := a.schoolFrom(readMap(a.session()))
 	s.Session = a.session()
 	b, e := os.ReadFile(s.Session)

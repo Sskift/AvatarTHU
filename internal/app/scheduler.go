@@ -366,9 +366,25 @@ func (a *App) eventManager(ctx context.Context) {
 	}
 }
 func (a *App) daemon() {
+	a.daemonMode(boolean(a.config(), "keepalive_only"))
+}
+func (a *App) daemonMode(keepaliveOnly bool) {
 	defer a.lock("daemon", false)()
 	ctx, cancel := context.WithCancel(a.Ctx)
 	defer cancel()
+	if keepaliveOnly {
+		a.monitor = &daemonMonitor{app: a, phase: "网络学堂保活（独立模式）", started: time.Now()}
+		a.monitor.beat()
+		done := make(chan struct{})
+		go func() { defer close(done); a.monitor.loop(ctx) }()
+		defer func() {
+			cancel()
+			<-done
+			writeJSON(a.data("daemon-health.json"), M{"state": "stopped", "pid": os.Getpid(), "time": stamp()})
+		}()
+		a.maintenanceLoop(ctx)
+		return
+	}
 	a.editorWake = make(chan struct{}, 1)
 	a.syncWake = make(chan struct{}, 1)
 	defer a.startEditor(ctx)()

@@ -232,6 +232,14 @@ avatarthu keepalive status
 
 `service start` does not launch duplicate processes. `service stop` stops scheduling, keepalive, and Feishu listeners while keeping all data. Use `avatarthu daemon` to run in the foreground.
 
+### Keepalive on an always-on computer
+
+Install the same native CLI version on both computers and verify noninteractive SSH access with a saved, verified host key. On the always-on computer, run `avatarthu configure --keepalive-only`, then `avatarthu service start`. This mode runs only session maintenance, without course scans, assignment execution, Feishu listeners or a workspace server. Windows uses the logged-in user's scheduled task and `%USERPROFILE%\.avatarthu`; no Windows password is stored. `avatarthu daemon --keepalive-only` also runs this mode in the foreground.
+
+On the local computer, set `avatarthu configure --keepalive-host home --keepalive-binary C:/Users/skift/.avatarthu/bin/avatarthu.exe`, then run `avatarthu keepalive run`. The executable path must not contain spaces or shell syntax. The remote process refreshes the school session every 10 minutes, including while the local computer sleeps. The local backend retrieves refreshed cookies over SSH at its maintenance interval and before course access when due; no additional network listener is opened. A missing or expired remote session can accept a locally saved session after validation. Routine exchanges prefer an already valid remote session over stale client cookies.
+
+Complete any required authentication locally with `avatarthu login thu`; the new session is then sent to the remote computer. Pending login updates survive connection failures and retry when SSH returns. If the remote computer is unreachable, local keepalive remains available and records `remote_error`. School-enforced reauthentication still requires the user. `avatarthu keepalive status` reports `source: ssh:home` when the latest session came from home. Disable remote access with `avatarthu configure --keepalive-host ''`; stop the remote process with `avatarthu service stop`. Restart the corresponding service after changing keepalive-only mode.
+
 <a id="macos-menubar"></a>
 
 ## Desktop App and menu bar

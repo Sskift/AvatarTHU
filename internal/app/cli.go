@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -35,7 +36,9 @@ func Main(args []string) (code int) {
 	if args[0] == "daemon" {
 		f := flag.NewFlagSet("daemon", flag.ContinueOnError)
 		root := f.String("home", "", "数据目录")
+		only := f.Bool("keepalive-only", false, "只保活，不同步课程或处理作业")
 		check(f.Parse(args[1:]))
+		ensure(f.NArg() == 0, "daemon 不接受位置参数")
 		if *root != "" {
 			a = New(ctx, *root)
 		}
@@ -50,7 +53,7 @@ func Main(args []string) (code int) {
 		defer log.Close()
 		os.Stdout, os.Stderr = log, log
 		fmt.Println(stamp(), "启动 AvatarTHU", Version)
-		a.daemon()
+		a.daemonMode(*only || boolean(a.config(), "keepalive_only"))
 		return 0
 	}
 	mkdir(a.Root)
@@ -180,7 +183,15 @@ func Main(args []string) (code int) {
 		if len(args) > 1 {
 			action = args[1]
 		}
-		ensure(action == "status" || action == "run", "用法：avatarthu keepalive status|run")
+		if action == "exchange" {
+			ensure(len(args) == 2, "exchange 不接受额外参数")
+			b, err := io.ReadAll(io.LimitReader(os.Stdin, 2<<20+1))
+			check(err)
+			ensure(len(b) <= 2<<20, "会话数据过大")
+			fmt.Println(string(jsonBytes(a.exchangeKeepalive(parseMap(b)))))
+			return 0
+		}
+		ensure(len(args) <= 2 && (action == "status" || action == "run"), "用法：avatarthu keepalive status|run")
 		state := readMap(filepath.Join(filepath.Dir(a.session()), "keepalive-status.json"))
 		if action == "run" {
 			state = a.keepalive(true, true)
@@ -260,6 +271,9 @@ func (a *App) configure(args []string) {
 	writer := f.String("writer", "", "主写 harness：claude 或 codex")
 	reviewer := f.String("reviewer", "", "复审 harness：claude 或 codex")
 	poll := f.String("poll-interval", "", "30m、12h、1d")
+	remoteHost := f.String("keepalive-host", "", "通过已有 SSH 主机保活；空值关闭")
+	remoteBinary := f.String("keepalive-binary", "", "远端原生程序的路径，不含空格或 shell 字符")
+	only := f.Bool("keepalive-only", false, "后台只保活，不同步课程或处理作业；重启后台生效")
 	rounds := f.Int("max-review-rounds", -1, "每版最多复审轮数，0 为不限")
 	check(f.Parse(args))
 	ensure(f.NArg() == 0, "configure 不接受位置参数，请用 --writer / --reviewer 选择 harness")
@@ -292,6 +306,24 @@ func (a *App) configure(args []string) {
 	func() {
 		defer a.lock("settings", true)()
 		cfg := a.config()
+		remote := M{}
+		merge(remote, obj(cfg, "keepalive_remote"))
+		f.Visit(func(v *flag.Flag) {
+			switch v.Name {
+			case "keepalive-host":
+				remote["host"] = *remoteHost
+			case "keepalive-binary":
+				remote["binary"] = *remoteBinary
+			case "keepalive-only":
+				changes["keepalive_only"] = *only
+			}
+		})
+		if str(remote, "host") != "" {
+			remoteKeepaliveArgs(remote)
+		}
+		if len(remote) > 0 {
+			changes["keepalive_remote"] = remote
+		}
 		if rolesChanged {
 			// Fill only the unchanged role from the previous configuration.
 			roles := M{}
@@ -410,6 +442,8 @@ avatarthu app [--view VIEW] [--task ID]     打开桌面工作台
 avatarthu web [--no-open]                  兼容入口，默认打开 App
 avatarthu edit [--no-open] [ID]            编辑报告、局部调用 Agent、提交定稿
 avatarthu keepalive status|run              查看或立即保活
+avatarthu configure --keepalive-host HOST --keepalive-binary PATH  通过 SSH 保活
+avatarthu configure --keepalive-only        后台只保活；重启后台生效
 avatarthu notifications on|off              可选飞书推送
 avatarthu doctor                           检查两种执行器的安装和登录
 avatarthu retry --tool claude|codex        恢复该工具的失败作业，不触发提交
@@ -418,6 +452,7 @@ avatarthu status                           查看作业、审阅文档和服务�
 avatarthu ignore 作业编号 [--reason 原因]    忽略无需提交的作业，保留历史记录
 avatarthu restore 作业编号                  恢复已忽略的作业
 avatarthu daemon                           前台运行同一个后台循环
+avatarthu daemon --keepalive-only          前台只保活，不处理作业
 avatarthu uninstall                        停用服务，保留全部数据`)
 }
 func printTools() {
