@@ -319,6 +319,9 @@ func mockCloud(t *testing.T, a *App, ambiguous bool) *int {
 	}
 	a.CallLark = func(args []string) M {
 		joined := strings.Join(args, " ")
+		if args[0] == "auth" && args[1] == "status" {
+			return M{"identities": M{"user": M{"available": true}}}
+		}
 		if strings.Contains(joined, "init-draft") {
 			folder := filepath.Join(a.Root, "draft-workspace")
 			mkdir(folder)
@@ -378,6 +381,31 @@ func TestUnknownDocumentCreateDoesNotDuplicate(t *testing.T) {
 	expectError(t, "待核对", func() { a.publishCloud(st) })
 	if *creates != 1 {
 		t.Fatal("duplicate doc")
+	}
+}
+
+func TestDocumentCreateResumesAfterUserAuthorization(t *testing.T) {
+	a := testApp(t)
+	a.saveConfig(M{"lark_enabled": true})
+	st := frozen(t, a)
+	creates := mockCloud(t, a, false)
+	authorized := a.CallLark
+	a.CallLark = func(args []string) M {
+		if args[0] == "auth" && args[1] == "status" {
+			return M{"verified": true, "identities": M{"bot": M{"available": true}, "user": M{"available": false}}}
+		}
+		return authorized(args)
+	}
+	expectError(t, "avatarthu login lark", func() { a.publishCloud(st) })
+	st = readMap(a.taskPath(str(st, "task_id")))
+	if *creates != 0 || boolean(obj(st, "review_doc"), "creating") {
+		t.Fatal("missing user authorization left an ambiguous document create")
+	}
+	a.CallLark = authorized
+	a.publishCloud(st)
+	a.publishCloud(st)
+	if *creates != 1 || !boolean(obj(st, "review_doc"), "verified") {
+		t.Fatal("did not resume and verify the original review")
 	}
 }
 

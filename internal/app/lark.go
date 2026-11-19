@@ -1,11 +1,15 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+const larkUserLoginRequired = "飞书本人授权不可用，请用原账号运行 avatarthu login lark --no-start 重新授权"
 
 func (a *App) lark(args ...string) M {
 	args = a.larkArgs(args...)
@@ -21,20 +25,45 @@ func (a *App) larkArgs(args ...string) []string {
 	}
 	return args
 }
-func (a *App) cliJSON(exe string, args ...string) M {
-	out, se, e := capture(a.Ctx, a.Root, 10*time.Minute, append([]string{exe}, args...)...)
-	if e != nil {
-		if len(se) > 0 {
-			if err := attempt(func() {
-				m := parseMap(se)
-				panic(fmt.Errorf("Lark：%s", safeError(strDefault(obj(m, "error"), "message", "命令失败，请检查登录、权限或网络"))))
-			}); err != nil {
-				panic(err)
+
+// Lark can write diagnostic lines before or after its JSON error envelope.
+func larkErrorResponse(stream []byte) M {
+	for len(stream) > 0 {
+		line, rest, _ := bytes.Cut(stream, []byte("\n"))
+		if bytes.HasPrefix(bytes.TrimSpace(line), []byte("{")) {
+			var response M
+			if json.NewDecoder(bytes.NewReader(stream)).Decode(&response) == nil && len(obj(response, "error")) > 0 {
+				return response
 			}
 		}
-		panic(fmt.Errorf("Lark CLI 执行失败，请检查登录、网络和权限：%s", safeError(e)))
+		stream = rest
 	}
-	v := parseMap(out)
+	return nil
+}
+
+func (a *App) cliJSON(exe string, args ...string) M {
+	out, se, e := capture(a.Ctx, a.Root, 10*time.Minute, append([]string{exe}, args...)...)
+	op := "Lark CLI " + strings.Join(args[:min(2, len(args))], " ")
+	var v M
+	if e != nil {
+		v = larkErrorResponse(se)
+		if v == nil {
+			v = larkErrorResponse(out)
+		}
+		if v == nil {
+			panic(fmt.Errorf("%s 执行失败，请检查登录、网络和权限：%s", op, safeError(e)))
+		}
+	} else if err := json.Unmarshal(out, &v); err != nil {
+		panic(fmt.Errorf("%s 返回无效 JSON 回执：%w", op, err))
+	}
+	ensure(v != nil, op+" 未返回 JSON 对象")
+	if failure := obj(v, "error"); e != nil || len(failure) > 0 {
+		message := strDefault(failure, "message", "命令失败，请检查登录、网络和权限")
+		if str(failure, "type") == "authentication" && strings.Contains(message, "need_user_authorization") {
+			message = larkUserLoginRequired
+		}
+		panic(fmt.Errorf("%s：%s", op, safeError(message)))
+	}
 	// Lark management commands return a bare object; API shortcuts wrap data.
 	if _, wrapped := v["ok"]; !wrapped && (len(args) > 0 && args[0] == "whoami" || len(args) > 1 && args[0] == "auth" && args[1] == "status") {
 		ensure(v["error"] == nil, "Lark 身份检查失败")

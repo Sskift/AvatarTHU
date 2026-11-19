@@ -33,6 +33,18 @@ func TestMain(m *testing.M) {
 			}
 			os.Exit(0)
 		}
+		if mode == "doc-auth-stderr" || mode == "doc-auth-stdout" {
+			fmt.Fprintln(os.Stderr, "lark-cli: user token refresh failed")
+			output := os.Stderr
+			if mode == "doc-auth-stdout" {
+				output = os.Stdout
+			}
+			fmt.Fprintln(output, `{
+  "ok": false,
+  "error": {"type":"authentication","message":"need_user_authorization (user: example)"}
+}`)
+			os.Exit(3)
+		}
 		if mode == "conflict" {
 			fmt.Fprintln(os.Stderr, `{"ok":false,"error":{"message":"another event bus is already connected to this app (1 remote event connection(s) detected via API)"}}`)
 			os.Exit(2)
@@ -42,6 +54,20 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 	os.Exit(m.Run())
+}
+
+func TestLarkUserAuthErrorSurvivesCLIDiagnostics(t *testing.T) {
+	a := testApp(t)
+	exe, err := os.Executable()
+	check(err)
+	for _, mode := range []string{"doc-auth-stderr", "doc-auth-stdout"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("AVATARTHU_TEST_EVENT_CLI", mode)
+			expectError(t, larkUserLoginRequired, func() {
+				a.cliJSON(exe, "docs", "+create", "--profile", "example")
+			})
+		})
+	}
 }
 
 func TestLarkLoginPinsProfileAndReadsBareIdentity(t *testing.T) {

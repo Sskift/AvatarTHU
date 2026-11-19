@@ -484,6 +484,8 @@ func (a *App) publishCloud(st M) M {
 		ensure(!boolean(review, "creating"), "审阅文档创建结果待核对，请先核对飞书回执，避免重复创建")
 		r := a.lark("docs", "+script", "--command", "parse", "--content", arg)
 		ensure(str(obj(r, "assessment"), "status") == "passed", "飞书文档解析未通过，请检查草稿日志")
+		auth := a.lark("auth", "status", "--json", "--verify")
+		ensure(boolean(obj(obj(auth, "identities"), "user"), "available"), larkUserLoginRequired)
 		review["creating"] = true
 		a.saveTask(st)
 		r = a.lark("docs", "+create", "--as", "user", "--doc-format", "xml", "--content", arg)
