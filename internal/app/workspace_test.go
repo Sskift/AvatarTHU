@@ -73,7 +73,7 @@ func TestWorkspaceIgnoreAndRestore(t *testing.T) {
 func TestWorkspaceTaskActionsRequireLocalSession(t *testing.T) {
 	a, st := editorFixture(t)
 	before := digest(a.taskPath(str(st, "task_id")))
-	for _, action := range []string{"ignore", "restore"} {
+	for _, action := range []string{"ignore", "restore", "revise"} {
 		for _, origin := range []string{"", "https://untrusted.example"} {
 			req := httptest.NewRequest("POST", "http://127.0.0.1:7777/api/workspace/task/"+str(st, "task_id")+"/"+action, strings.NewReader("{}"))
 			want := http.StatusUnauthorized
@@ -296,5 +296,124 @@ func TestWorkspaceArtifactsThroughFriendlyHomeAlias(t *testing.T) {
 	result := editorResult(t, editorCall(t, a, "/api/workspace/task/"+str(st, "task_id"), nil))
 	if len(objects(result["revisions"])) != 1 {
 		t.Fatal("artifacts not found through home symlink", result)
+	}
+}
+
+func TestWorkspaceRevisionWithFileFeedback(t *testing.T) {
+	a := testApp(t)
+	st := frozen(t, a)
+	oldFile := str(st, "submission")
+	oldHash := digest(oldFile)
+	id := str(st, "task_id")
+	url := "/api/workspace/task/" + id
+	name := filepath.Base(oldFile)
+	if boolean(a.workspaceTask(id), "has_report_source") {
+		t.Fatal("text-only fixture has no report to edit")
+	}
+	base := digest(a.taskPath(id))
+	for _, request := range []M{
+		{"revision": 0, "instruction": "old"},
+		{"revision": 1.1, "instruction": "invalid revision"},
+		{"revision": 1, "instruction": "  "},
+		{"revision": 1, "instruction": "incorrect file", "files": []string{"previous-version.pdf"}},
+	} {
+		if r := editorCall(t, a, url+"/revise", request); r.Code != 409 || digest(a.taskPath(id)) != base {
+			t.Fatal("accepted invalid revision request", request, r.Code)
+		}
+	}
+	request := M{"revision": 1, "instruction": "OWNER_CHANGE", "files": []string{name}}
+	got := editorResult(t, editorCall(t, a, url+"/revise", request))
+	if str(got, "status") != "revision_ready" || boolean(got, "can_revise") || number(obj(got, "workflow"), "target_revision", 0) != 2 {
+		t.Fatal(got)
+	}
+	if r := editorCall(t, a, url+"/revise", request); r.Code != 409 {
+		t.Fatal("accepted revision request twice")
+	}
+	// Material synchronization can land between the owner action and the worker.
+	a.applySyncAssignment(id, M{"description": st["description"]}, materialsHash(st))
+	st = readMap(a.taskPath(id))
+	writerCalled, reviewCalled := false, false
+	a.RunModel = func(engine, job, prompt string, schema M, role string, plan M) M {
+		if role == "writer" {
+			writerCalled = true
+			if !strings.Contains(prompt, "OWNER_CHANGE") || !strings.Contains(prompt, name) ||
+				digest(filepath.Join(job, "previous-final", name)) != oldHash {
+				t.Fatal("writer lost the pinned file or feedback")
+			}
+			during := a.workspaceTask(id)
+			versions := objects(during["revisions"])
+			if number(during, "revision", 0) != 2 || len(versions) != 1 || number(versions[0], "revision", 0) != 1 {
+				t.Fatal("old delivery incorrectly appeared under the revision in progress", versions)
+			}
+			return resultAt(job, "updated file")
+		}
+		reviewCalled = true
+		if strings.Contains(prompt, "OWNER_CHANGE") || !exists(filepath.Join(job, "submission", name)) {
+			t.Fatal("reviewer did not receive the independent delivery")
+		}
+		return M{"approved": true, "summary": "reviewed", "checks": []string{}, "comments": []M{}, "limitations": []string{}}
+	}
+	a.process(st)
+	task := editorResult(t, editorCall(t, a, url, nil))
+	versions := objects(task["revisions"])
+	if !writerCalled || !reviewCalled || str(task, "status") != "awaiting" || len(versions) != 2 ||
+		number(versions[0], "revision", 0) != 2 || number(versions[1], "revision", 0) != 1 ||
+		str(obj(versions[0], "submission"), "path") == str(obj(versions[1], "submission"), "path") || digest(oldFile) != oldHash {
+		t.Fatal("new review did not preserve both deliveries", task)
+	}
+	if editorCall(t, a, url+"/revise", request).Code != 409 {
+		t.Fatal("old review page queued feedback against a newer delivery")
+	}
+	for _, status := range []string{"submitted", "submitting", "submission_unknown", "ignored", "closed_remote"} {
+		st["status"] = status
+		a.saveTask(st)
+		if editorCall(t, a, url+"/revise", M{"revision": 2, "instruction": "new"}).Code != 409 {
+			t.Fatal("queued revision in protected state", status)
+		}
+	}
+}
+
+func TestEditorReviewFollowsDraftBase(t *testing.T) {
+	a, st := editorFixture(t)
+	draft := a.editorDraft(st)
+	st["revision"] = 2
+	st["review_history"] = []M{
+		{"revision": 1, "round": 1, "summary": "first round"},
+		{"revision": 1, "round": 2, "summary": "on the open draft", "writer_job": "PRIVATE_PATH"},
+		{"revision": 2, "round": 1, "summary": "another edition"},
+	}
+	view := a.editorView(st)
+	if number(draft, "base_revision", 0) != 1 || str(obj(view, "review"), "summary") != "on the open draft" || strings.Contains(string(jsonBytes(view)), "PRIVATE_PATH") {
+		t.Fatal(view)
+	}
+}
+
+func TestWorkspaceReadsSourceInsideFrozenZIP(t *testing.T) {
+	a := testApp(t)
+	st := revisionFixture(t, a)
+	c := a.workspaceCourses()[0]
+	var file string
+	for _, f := range objects(st["artifacts"]) {
+		if filepath.Base(str(f, "path")) == "code.zip" {
+			file = str(f, "path")
+		}
+	}
+	before := digest(file)
+	q := url.Values{"course": {c.ID}, "path": {filepath.ToSlash(relative(c.Dir, file))}}
+	preview := editorResult(t, editorCall(t, a, "/api/workspace/preview?"+q.Encode(), nil))
+	member := obj(objects(preview["entries"])[0], "file")
+	if str(member, "member") != "src/main.go" {
+		t.Fatal(member)
+	}
+	q.Set("member", "src/main.go")
+	got := editorResult(t, editorCall(t, a, "/api/workspace/preview?"+q.Encode(), nil))
+	raw := editorCall(t, a, "/api/workspace/file?"+q.Encode(), nil)
+	if str(got, "kind") != "text" || !strings.Contains(str(got, "text"), "return a + b") || raw.Body.String() != str(got, "text") ||
+		!strings.Contains(raw.Header().Get("Content-Disposition"), "main.go") || digest(file) != before {
+		t.Fatal("wrong bytes for selected ZIP member", got, raw.Body.String())
+	}
+	q.Set("member", "../private.txt")
+	if editorCall(t, a, "/api/workspace/file?"+q.Encode(), nil).Code != 409 {
+		t.Fatal("accepted unknown member")
 	}
 }

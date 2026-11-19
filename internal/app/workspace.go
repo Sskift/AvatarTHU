@@ -1,11 +1,9 @@
 package app
 
 import (
-	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 type workspaceCourse struct{ ID, Name, Semester, Dir string }
@@ -224,7 +221,17 @@ func (a *App) workspaceOverview() M {
 			if courseContainsTask(c, st) {
 				count++
 				item := editorTaskSummary(st)
-				merge(item, M{"course_id": c.ID, "semester": c.Semester, "deadline": st["deadline"], "updated_at": st["updated_at"], "artifact_count": len(objects(st["artifacts"]))})
+				artifactCount := len(objects(st["artifacts"]))
+				hasDelivery := artifactCount > 0 && !boolean(st, "artifacts_removed")
+				if !hasDelivery {
+					for _, old := range objects(st["revision_history"]) {
+						if !boolean(old, "artifacts_removed") && len(objects(old["artifacts"])) > 0 {
+							hasDelivery = true
+							break
+						}
+					}
+				}
+				merge(item, M{"course_id": c.ID, "semester": c.Semester, "deadline": st["deadline"], "updated_at": st["updated_at"], "artifact_count": artifactCount, "has_delivery": hasDelivery})
 				tasks = append(tasks, item)
 			}
 		}
@@ -232,6 +239,76 @@ func (a *App) workspaceOverview() M {
 	}
 	return M{"courses": courses, "tasks": tasks, "health": a.workspaceHealth()}
 }
+func workspaceReview(entry M) M {
+	row := M{}
+	for _, key := range []string{"id", "revision", "round", "approved", "summary", "comments", "checks", "limitations", "reviewed_at", "reviewer", "writer", "packaging_error"} {
+		row[key] = entry[key]
+	}
+	return row
+}
+
+func (a *App) hasReportSource(st M) bool {
+	original, bundle, file := editorSources(st)
+	if original != "" || bundle != "" || file != "" {
+		return true
+	}
+	draft := readMap(filepath.Join(a.editorDir(st), "draft.json"))
+	return number(draft, "base_revision", 0) == publishedRevision(st) && str(draft, "markdown") != ""
+}
+
+// Use the frozen output for this revision. The top-level working copy may
+// have been edited or exported manually since publication.
+func workspaceDeliveryFile(c workspaceCourse, p string, revision int) M {
+	canonical, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(c.Dir, canonical)
+	if err != nil {
+		return nil
+	}
+	rel = filepath.ToSlash(rel)
+	kind := publicCourseFile(rel)
+	if kind != "artifact" && kind != "submission" {
+		return nil
+	}
+	info, err := os.Stat(canonical)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	return M{"course_id": c.ID, "path": rel, "name": filepath.Base(p), "size": info.Size(), "kind": kind, "revision": revision}
+}
+
+type workspaceRevisionRequest struct {
+	Revision    int      `json:"revision"`
+	Instruction string   `json:"instruction"`
+	Files       []string `json:"files"`
+}
+
+func (a *App) workspaceRevise(id string, in workspaceRevisionRequest) {
+	path := a.taskPath(id)
+	defer a.lock(id, false)()
+	st := readMap(path)
+	ensure(editorEditable(st), "当前状态不能接收修改，请查看最新进度")
+	ensure(in.Revision == number(st, "revision", 1), "作业版本已更新，请重新审阅")
+	instruction := strings.TrimSpace(in.Instruction)
+	ensure(instruction != "" && len(instruction) <= 12000, "请填写修改意见（最多 12 KB）")
+	available := map[string]bool{}
+	if publishedRevision(st) == number(st, "revision", 1) {
+		for _, artifact := range objects(st["artifacts"]) {
+			available[filepath.Base(str(artifact, "path"))] = true
+		}
+	}
+	for _, name := range in.Files {
+		ensure(available[name], "所选文件不在本版交付中，请重新审阅")
+		delete(available, name)
+	}
+	if len(in.Files) > 0 {
+		instruction = "涉及文件：" + strings.Join(in.Files, "、") + "\n" + instruction
+	}
+	a.queueRevision(st, instruction)
+}
+
 func (a *App) workspaceTask(id string) M {
 	st := readMap(a.taskPath(id))
 	ensure(len(st) > 0, "找不到这份作业")
@@ -240,13 +317,39 @@ func (a *App) workspaceTask(id string) M {
 	merge(result, M{"ignored_at": st["ignored_at"], "ignored_reason": st["ignored_reason"]})
 	reviews := []M{}
 	for _, r := range objects(st["review_history"]) {
-		row := M{}
-		for _, key := range []string{"id", "revision", "round", "approved", "summary", "comments", "checks", "limitations", "reviewed_at", "reviewer", "writer"} {
-			row[key] = r[key]
-		}
-		reviews = append(reviews, row)
+		reviews = append(reviews, workspaceReview(r))
 	}
 	result["reviews"] = reviews
+	result["has_report_source"] = a.hasReportSource(st)
+	result["can_revise"] = editorEditable(st)
+	revision := number(st, "revision", 1)
+	target := revision
+	plan := obj(st, "execution_plan")
+	if str(st, "status") == "revision_ready" {
+		target++
+		plan = nil
+	}
+	writer, reviewer := str(plan, "writer"), str(plan, "reviewer")
+	if len(plan) == 0 {
+		if target != revision || str(st, "status") == "queued" {
+			writer, reviewer = configuredHarnesses(a.config())
+		} else {
+			for _, review := range reviews {
+				if number(review, "revision", 0) == revision {
+					writer, reviewer = str(review, "writer"), str(review, "reviewer")
+				}
+			}
+		}
+	}
+	workflow := M{"writer": writer, "reviewer": reviewer, "target_revision": target, "feedback": st["feedback"]}
+	if target == revision {
+		workflow["round"] = st["review_round"]
+	}
+	if publishedRevision(st) == revision && target == revision {
+		workflow["blockers"] = texts(st["blockers"])
+		workflow["student_inputs"] = texts(st["student_inputs"])
+	}
+	result["workflow"] = workflow
 	for _, c := range a.workspaceCourses() {
 		if !courseContainsTask(c, st) {
 			continue
@@ -279,7 +382,7 @@ func (a *App) workspaceTask(id string) M {
 			if boolean(r, "artifacts_removed") {
 				continue
 			}
-			n := number(r, "revision", 1)
+			n := publishedRevision(r)
 			if seen[n] {
 				continue
 			}
@@ -287,26 +390,20 @@ func (a *App) workspaceTask(id string) M {
 			files := []M{}
 			for _, artifact := range objects(r["artifacts"]) {
 				p := str(artifact, "path")
-				canonical, err := filepath.EvalSymlinks(p)
-				if err != nil {
-					continue
+				if file := workspaceDeliveryFile(c, p, n); file != nil {
+					if selected, known := artifact["in_submission"].(bool); known {
+						file["submission_member"] = selected
+					}
+					files = append(files, file)
 				}
-				rel, err := filepath.Rel(c.Dir, canonical)
-				if err != nil {
-					continue
-				}
-				rel = filepath.ToSlash(rel)
-				if publicCourseFile(rel) != "artifact" || !exists(p) {
-					continue
-				}
-				info, e := os.Stat(p)
-				if e != nil {
-					continue
-				}
-				files = append(files, M{"course_id": c.ID, "path": rel, "name": filepath.Base(p), "size": info.Size(), "kind": "artifact", "revision": n})
 			}
-			if len(files) > 0 {
-				revisions = append(revisions, M{"revision": n, "files": files})
+			submission := workspaceDeliveryFile(c, str(r, "submission"), n)
+			if len(files) > 0 || submission != nil {
+				notes := r["revision_notes"]
+				if p := obj(r, "presentation"); len(p) != 0 {
+					notes = p["revision_notes"]
+				}
+				revisions = append(revisions, M{"revision": n, "files": files, "submission": submission, "revision_notes": notes})
 			}
 		}
 		result["revisions"] = revisions
@@ -327,43 +424,6 @@ func (a *App) workspaceFile(c workspaceCourse, rel string) string {
 	check(e)
 	ensure(info.Mode().IsRegular(), "只能访问普通文件")
 	return p
-}
-func (a *App) workspaceFilePreview(c workspaceCourse, rel string) M {
-	p := a.workspaceFile(c, rel)
-	info, e := os.Stat(p)
-	check(e)
-	ext := strings.ToLower(filepath.Ext(p))
-	result := M{"name": filepath.Base(p), "size": info.Size(), "kind": "download"}
-	switch ext {
-	case ".pdf":
-		result["kind"] = "pdf"
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
-		result["kind"] = "image"
-	case ".html", ".htm":
-		result["kind"] = "html"
-	case ".zip":
-		z, e := zip.OpenReader(p)
-		check(e)
-		defer z.Close()
-		entries := []M{}
-		for _, f := range z.File {
-			if !f.FileInfo().IsDir() {
-				entries = append(entries, M{"name": f.Name, "size": f.UncompressedSize64})
-			}
-			if len(entries) >= 500 {
-				break
-			}
-		}
-		merge(result, M{"kind": "zip", "entries": entries, "truncated": len(z.File) > 500})
-	default:
-		if info.Size() <= 1<<20 {
-			b := readBytes(p)
-			if utf8.Valid(b) && !strings.ContainsRune(string(b), 0) {
-				merge(result, M{"kind": "text", "text": string(b)})
-			}
-		}
-	}
-	return result
 }
 func (a *App) workspaceUpload(w http.ResponseWriter, r *http.Request, c workspaceCourse) M {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
@@ -441,6 +501,11 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			result = a.workspaceDirectory(a.workspaceCourse(r.URL.Query().Get("course")), r.URL.Query().Get("path"))
 		case r.Method == "GET" && action == "task" && len(parts) == 4:
 			result = a.workspaceTask(parts[3])
+		case r.Method == "POST" && action == "task" && len(parts) == 5 && parts[4] == "revise":
+			var in workspaceRevisionRequest
+			check(decodeWorkspaceJSON(w, r, &in))
+			a.workspaceRevise(parts[3], in)
+			result = a.workspaceTask(parts[3])
 		case r.Method == "POST" && action == "task" && len(parts) == 5 && (parts[4] == "ignore" || parts[4] == "restore"):
 			in := M{}
 			check(decodeWorkspaceJSON(w, r, &in))
@@ -452,23 +517,9 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			result = a.workspaceTask(parts[3])
 		case (action == "preview" || action == "file") && r.Method == "GET":
 			c := a.workspaceCourse(r.URL.Query().Get("course"))
-			rel := r.URL.Query().Get("path")
-			if action == "preview" {
-				result = a.workspaceFilePreview(c, rel)
-				break
+			if preview := a.workspaceReadFile(w, r, c, action == "preview"); preview != nil {
+				result = preview
 			}
-			p := a.workspaceFile(c, rel)
-			disposition := "attachment"
-			if r.URL.Query().Get("inline") == "1" {
-				disposition = "inline"
-			}
-			w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filepath.Base(p)}))
-			policy := "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox; frame-ancestors 'self'"
-			if strings.EqualFold(filepath.Ext(p), ".pdf") {
-				policy = "frame-ancestors 'self'; base-uri 'none'"
-			}
-			w.Header().Set("Content-Security-Policy", policy)
-			http.ServeFile(w, r, p)
 		case action == "upload" && r.Method == "POST":
 			result = a.workspaceUpload(w, r, a.workspaceCourse(r.URL.Query().Get("course")))
 		case action == "file-action" && r.Method == "POST":
@@ -509,7 +560,7 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
-func decodeWorkspaceJSON(w http.ResponseWriter, r *http.Request, in *M) error {
+func decodeWorkspaceJSON(w http.ResponseWriter, r *http.Request, in any) error {
 	return json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(in)
 }
 func writeWorkspaceJSON(w http.ResponseWriter, value any) { _ = json.NewEncoder(w).Encode(value) }

@@ -13,18 +13,12 @@ if (window.avatarDesktop) {
     const span = link.querySelector('span'); if (span) span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[link.dataset.nav] + '</svg>';
   });
   const seal = document.querySelector('.seal'); if (seal) seal.innerHTML = '<img src="/desktop/seal.svg" alt="">';
-  const brand = document.querySelector('.workspace') && document.querySelector('.brand');
-  if (brand && brand.firstChild?.nodeType === Node.TEXT_NODE) {
-    const logo = document.createElement('img'); logo.src = '/desktop/seal.svg'; logo.alt = ''; logo.className = 'desktop-editor-seal';
-    brand.firstChild.replaceWith(logo);
-  }
-  const foot = document.querySelector('.sidebar-foot small'); if (foot) foot.textContent = '课程与报告，保存在本机';
   if (typeof renderSettings === 'function') {
     const render = renderSettings;
     renderSettings = function (health) {
       render(health);
       const panel = document.createElement('section'); panel.className = 'panel desktop-controls';
-      panel.innerHTML = '<div><span class="eyebrow">DESKTOP</span><h2>后台与连接</h2><p class="muted">关闭 App 窗口后，课程后台仍会继续工作。</p></div><div class="desktop-control-grid"><button data-desktop-action="start">启动后台</button><button data-desktop-action="stop">停止后台</button><button data-desktop-action="doctor">检查 Claude / Codex</button><button data-desktop-action="keepalive">检查学堂连接</button><button data-desktop-action="retry-codex">恢复 Codex 任务</button><button data-desktop-action="retry-claude">恢复 Claude 任务</button><button data-desktop-action="reconnect-lark">重连飞书</button><button data-desktop-action="login">登录网络学堂</button></div><div class="desktop-folder-actions"><button data-desktop-reveal="courses">在文件管理器中打开课程</button><button data-desktop-reveal="logs">查看日志目录</button></div><p class="desktop-command-result" role="status" hidden></p>';
+      panel.innerHTML = '<div><h2>后台与连接</h2><p class="muted">关闭 App 窗口后，课程后台仍会继续工作。</p></div><div class="desktop-control-grid"><button data-desktop-action="start">启动后台</button><button data-desktop-action="stop">停止后台</button><button data-desktop-action="doctor">检查 Claude / Codex</button><button data-desktop-action="keepalive">检查学堂连接</button><button data-desktop-action="retry-codex">恢复 Codex 任务</button><button data-desktop-action="retry-claude">恢复 Claude 任务</button><button data-desktop-action="reconnect-lark">重连飞书</button><button data-desktop-action="login">登录网络学堂</button></div><div class="desktop-folder-actions"><button data-desktop-reveal="courses">在文件管理器中打开课程</button><button data-desktop-reveal="logs">查看日志目录</button></div><p class="desktop-command-result" role="status" hidden></p>';
       document.getElementById('content').append(panel);
     };
   }

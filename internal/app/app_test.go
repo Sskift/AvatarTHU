@@ -42,7 +42,7 @@ func frozen(t *testing.T, a *App) M {
 	job := filepath.Join(str(st, "assignment_dir"), "runs", "r1", "writer")
 	r := resultAt(job, "2")
 	st["job"] = job
-	a.snapshot(st, r, job)
+	a.snapshot(st, r, job, nil)
 	merge(st, M{"status": "awaiting", "card_message_id": "card1", "chat_id": "chat"})
 	a.saveTask(st)
 	return st
@@ -422,7 +422,7 @@ func TestRevisionsUpdateOneCloudDocument(t *testing.T) {
 			st["revision"] = 2
 			st["review_history"] = append(objects(st["review_history"]), M{"revision": 2, "round": 1, "summary": "second independent review", "approved": true})
 			job := filepath.Join(a.Root, "second-writer")
-			a.snapshot(st, resultAt(job, "revised answer"), job)
+			a.snapshot(st, resultAt(job, "revised answer"), job, nil)
 			if doc := obj(st, "review_doc"); str(doc, "document_id") != "doc1" || boolean(doc, "verified") || str(doc, "draft") != "" {
 				t.Fatal("lost document identity or retained old publication state", doc)
 			}

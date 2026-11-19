@@ -82,6 +82,10 @@ func (p *submissionPacker) add(name string, info os.FileInfo, r io.Reader, depth
 }
 
 func buildSubmissionZIP(destination string, files []string) {
+	buildSubmissionZIPFrom(destination, files, "")
+}
+
+func buildSubmissionZIPFrom(destination string, files []string, base string) {
 	mkdir(filepath.Dir(destination))
 	f, err := os.CreateTemp(filepath.Dir(destination), ".submission-*.zip")
 	check(err)
@@ -97,7 +101,11 @@ func buildSubmissionZIP(destination string, files []string) {
 			src, err := os.Open(file)
 			check(err)
 			defer src.Close()
-			p.add(filepath.Base(file), info, src, 0)
+			name := filepath.Base(file)
+			if base != "" {
+				name = filepath.ToSlash(relative(base, file))
+			}
+			p.add(name, info, src, 0)
 		}()
 	}
 	check(z.Close())
@@ -110,25 +118,33 @@ func (a *App) exportSubmission(tid, selected string) string {
 	defer a.lock(tid, true)()
 	st := readMap(a.taskPath(tid))
 	ensure(len(st) > 0 && len(objects(st["artifacts"])) > 0, "这份作业还没有可导出的产物")
-	a.verifiedFiles(st)
-	if selected == "" && str(st, "assignment_dir") != "" && usesAssignmentLayout(str(st, "assignment_dir")) {
+	base := strDefault(st, "assignment_dir", a.data("jobs", tid))
+	exportDir := assignmentPath(base, "exports", fmt.Sprintf("r%d", publishedRevision(st)))
+	if selected != "" {
+		for _, artifact := range objects(st["artifacts"]) {
+			file := str(artifact, "path")
+			if filepath.Base(file) != selected {
+				continue
+			}
+			source := inside(a.outputDir(st), relative(a.outputDir(st), file))
+			ensure(digest(source) == str(artifact, "sha256"), "指定下载件与冻结版本不一致")
+			destination := filepath.Join(exportDir, selected)
+			copyArtifact(source, destination)
+			return destination
+		}
+		panic("找不到指定产物：" + selected)
+	}
+	ensure(str(st, "submission") != "", "这份作业还没有冻结的提交文件")
+	if str(st, "assignment_dir") != "" && usesAssignmentLayout(base) {
 		folder := a.publishSubmission(st)
 		return filepath.Join(filepath.Dir(folder), "submission.zip")
 	}
-	files := []string{}
-	for _, artifact := range objects(st["artifacts"]) {
-		file := str(artifact, "path")
-		if selected == "" || filepath.Base(file) == selected {
-			files = append(files, file)
-		}
+	source := a.verifiedFiles(st)
+	destination := filepath.Join(exportDir, "submission.zip")
+	if strings.EqualFold(filepath.Ext(source), ".zip") {
+		copyArtifact(source, destination)
+	} else {
+		buildSubmissionZIP(destination, []string{source})
 	}
-	ensure(len(files) > 0, "找不到指定产物："+selected)
-	base := strDefault(st, "assignment_dir", a.data("jobs", tid))
-	name := "submission.zip"
-	if selected != "" && strings.EqualFold(filepath.Ext(selected), ".zip") {
-		name = selected
-	}
-	destination := assignmentPath(base, "exports", fmt.Sprintf("r%d", number(st, "revision", 1)), name)
-	buildSubmissionZIP(destination, files)
 	return destination
 }

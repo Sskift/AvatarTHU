@@ -117,8 +117,7 @@ func (a *App) act(event M) bool {
 			feedback = strings.Join(parts, "\n\n")
 			st["review_comments"] = entries
 		}
-		merge(st, M{"status": "revision_ready", "feedback": feedback, "approval_event": nil})
-		a.saveTask(st)
+		a.queueRevision(st, feedback)
 		a.send(receiptCard("已收到修改意见", str(st, "title"), "已排入本地队列，完成后发送新版审阅卡片。", true), "feedback:"+str(event, "event_id"))
 		return true
 	}
@@ -229,8 +228,7 @@ func (a *App) message(event M) bool {
 		return false
 	}
 	st["feedback_messages"] = append(texts(st["feedback_messages"]), str(event, "message_id"))
-	merge(st, M{"status": "revision_ready", "feedback": feedback, "approval_event": nil})
-	a.saveTask(st)
+	a.queueRevision(st, feedback)
 	a.send(receiptCard("修改已排队", str(st, "title"), "会自动处理并独立复审，完成后发给你。", true), "feedback:"+str(event, "message_id"))
 	return true
 }

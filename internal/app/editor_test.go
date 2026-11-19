@@ -395,7 +395,7 @@ func TestEditorLivesWithDaemonWithoutFeishu(t *testing.T) {
 	body, e := io.ReadAll(response.Body)
 	response.Body.Close()
 	check(e)
-	if response.StatusCode != 200 || !bytes.Contains(body, []byte("提交成品")) {
+	if response.StatusCode != 200 || !bytes.Contains(body, []byte("交给主写更新产物")) {
 		t.Fatal("editor page unavailable")
 	}
 	cancel()
@@ -406,5 +406,42 @@ func TestEditorLivesWithDaemonWithoutFeishu(t *testing.T) {
 	}
 	if str(readMap(a.data("editor-server.json")), "state") != "stopped" {
 		t.Fatal("editor not closed with daemon")
+	}
+}
+
+func TestEditorOpenedBeforeFirstReport(t *testing.T) {
+	a := testApp(t)
+	st := fixture(t, a)
+	d := a.editorDraft(st)
+	dir := filepath.Join(a.outputDir(st), "artifacts")
+	readme := filepath.Join(dir, "README.md")
+	writeFile(readme, []byte("Build instructions"), 0600)
+	st["artifacts"] = []M{{"path": readme}}
+	if a.hasReportSource(st) || number(a.editorDraft(st), "version", 0) != number(d, "version", -1) {
+		t.Fatal("README became an editable report")
+	}
+	report := filepath.Join(dir, "report.md")
+	writeFile(report, []byte("New report"), 0600)
+	st["artifacts"] = append(objects(st["artifacts"]), M{"path": report})
+	if current := a.editorDraft(st); str(current, "markdown") != "New report" || number(current, "version", 0) != 2 {
+		t.Fatal("empty early editor draft hid the first published manuscript", current)
+	}
+}
+
+func TestEditorHandoffTracksOnlyItsRevision(t *testing.T) {
+	a, st := editorFixture(t)
+	id := strings.Repeat("a", 32)
+	a.newEditorRequest(st, M{"id": id, "version": 1}, "submit")
+	if str(a.editorRequests(st)[0], "task_status") != "revision_ready" {
+		t.Fatal("queued handoff lost its task")
+	}
+	st["revision"] = 2
+	st["status"] = "awaiting"
+	if str(a.editorRequests(st)[0], "task_status") != "awaiting" {
+		t.Fatal("completed handoff lost its delivery")
+	}
+	a.queueRevision(st, "Change a different artifact")
+	if a.editorRequests(st)[0]["task_status"] != nil {
+		t.Fatal("older editor handoff claimed the following workspace revision")
 	}
 }

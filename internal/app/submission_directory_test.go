@@ -374,7 +374,7 @@ func TestSubmissionSnapshotSeparatesDownloadsAndPreservesSingleFileUpload(t *tes
 					submissionDirectoryMember{"program/run", []byte("executable"), 0755}), 0600)
 				r["files"] = append(texts(r["files"]), "final/project.zip")
 			}
-			a.snapshot(st, r, job)
+			a.snapshot(st, r, job, nil)
 			out := str(st, "output_dir")
 			for _, artifact := range objects(st["artifacts"]) {
 				file := str(artifact, "path")

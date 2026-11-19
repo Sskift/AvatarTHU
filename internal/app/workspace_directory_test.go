@@ -27,7 +27,7 @@ func TestWorkspaceDirectoryMatchesAssignmentLayout(t *testing.T) {
 			result := resultAt(job, "2")
 			writeFile(filepath.Join(job, "final", "program.txt"), []byte("program"), 0600)
 			result["files"] = append(texts(result["files"]), "final/program.txt")
-			a.snapshot(st, result, job)
+			a.snapshot(st, result, job, nil)
 			a.publishSubmission(st)
 			a.saveTask(st)
 			root := str(st, "assignment_dir")

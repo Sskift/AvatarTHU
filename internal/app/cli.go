@@ -222,8 +222,7 @@ func Main(args []string) (code int) {
 		default:
 			panic(fmt.Errorf("此作业当前不能接收新修改"))
 		}
-		merge(st, M{"status": "revision_ready", "feedback": *feedback, "approval_event": nil})
-		a.saveTask(st)
+		a.queueRevision(st, *feedback)
 		fmt.Println("修改已排队，后台下一分钟开始处理；也可运行 avatarthu run。")
 	case "service":
 		ensure(len(args) == 2, "用法：avatarthu service start|stop|status")

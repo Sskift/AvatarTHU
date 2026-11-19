@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -35,9 +34,57 @@ var reportMarkdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
 func (a *App) editorDir(st M) string {
 	return assignmentPath(strDefault(st, "assignment_dir", a.data("jobs", str(st, "task_id"))), "editor")
 }
+
+// report.md is the current format. Older versions also published named
+// manuscripts; a standalone project README or review log is not a manuscript.
+func manuscriptFile(paths []string) string {
+	legacy := ""
+	for _, p := range paths {
+		name := strings.ToLower(filepath.Base(p))
+		if filepath.Ext(name) != ".md" || !exists(p) {
+			continue
+		}
+		switch name {
+		case "report.md":
+			return p
+		case "readme.md", "review.md", "changelog.md", "license.md":
+			continue
+		}
+		if legacy == "" {
+			legacy = p
+		}
+	}
+	return legacy
+}
+
+func editorSources(st M) (original, bundle, standalone string) {
+	if base := str(st, "assignment_dir"); base != "" {
+		source := assignmentPath(base, "report-source", fmt.Sprintf("r%d", publishedRevision(st)))
+		files, _ := filepath.Glob(filepath.Join(source, "*.md"))
+		original = manuscriptFile(files)
+	}
+	paths := []string{}
+	for _, item := range objects(st["artifacts"]) {
+		p := str(item, "path")
+		paths = append(paths, p)
+		if filepath.Base(p) == "report-source.zip" && exists(p) {
+			bundle = p
+		}
+	}
+	return original, bundle, manuscriptFile(paths)
+}
+
 func (a *App) editorDraft(st M) M {
 	path := filepath.Join(a.editorDir(st), "draft.json")
 	if d := readMap(path); len(d) != 0 {
+		// A direct editor link may have been opened before the first delivery.
+		if number(d, "version", 0) == 1 && number(d, "base_revision", 0) == publishedRevision(st) &&
+			str(d, "markdown") == "" && str(d, "base_markdown") == "" {
+			original, bundle, file := editorSources(st)
+			if original != "" || bundle != "" || file != "" {
+				return a.seedEditor(st)
+			}
+		}
 		return d
 	}
 	return a.seedEditor(st)
@@ -45,37 +92,23 @@ func (a *App) editorDraft(st M) M {
 func (a *App) seedEditor(st M) M {
 	root := a.editorDir(st)
 	previous := readMap(filepath.Join(root, "draft.json"))
-	revision := number(st, "revision", 1)
-	if n, e := strconv.Atoi(strings.TrimPrefix(filepath.Base(a.outputDir(st)), "r")); e == nil && n > 0 {
-		revision = n
-	}
+	revision := publishedRevision(st)
 	source := filepath.Join(root, "sources", "r"+fmt.Sprint(revision)+"-"+randomID(4))
 	mkdir(source)
 	var markdown string
-	existing := assignmentPath(str(st, "assignment_dir"), "report-source", fmt.Sprintf("r%d", revision))
-	candidates, _ := filepath.Glob(filepath.Join(existing, "*.md"))
-	if len(candidates) > 0 {
-		markdown = string(readBytes(candidates[0]))
-		copyEditorImages(existing, source)
-	} else {
-		for _, artifact := range objects(st["artifacts"]) {
-			p := str(artifact, "path")
-			if filepath.Base(p) == "report-source.zip" && exists(p) {
-				extractEditorSource(p, source)
-			}
-		}
-		candidates, _ = filepath.Glob(filepath.Join(source, "*.md"))
-		if len(candidates) > 0 {
-			markdown = string(readBytes(candidates[0]))
-		} else {
-			for _, artifact := range objects(st["artifacts"]) {
-				p := str(artifact, "path")
-				if strings.EqualFold(filepath.Ext(p), ".md") && filepath.Base(p) != "review.md" && exists(p) {
-					markdown = string(readBytes(p))
-					copyEditorImages(filepath.Dir(p), source)
-					break
-				}
-			}
+	original, bundle, standalone := editorSources(st)
+	if original == "" && bundle != "" {
+		extractEditorSource(bundle, source)
+		files, _ := filepath.Glob(filepath.Join(source, "*.md"))
+		original = manuscriptFile(files)
+	}
+	if original == "" {
+		original = standalone
+	}
+	if original != "" {
+		markdown = string(readBytes(original))
+		if filepath.Dir(original) != source {
+			copyEditorImages(filepath.Dir(original), source)
 		}
 	}
 	ensure(len(markdown) <= 2<<20, "报告源文件超过 2 MB，请先缩小文件")
@@ -141,13 +174,17 @@ func (a *App) editorRequests(st M) []M {
 	result := []M{}
 	for _, p := range paths {
 		r := readMap(p)
-		if str(r, "kind") == "submit" && str(obj(st, "editor_submission"), "id") == str(r, "id") {
+		revision, target := number(st, "revision", 1), number(r, "target_revision", 0)
+		tracking := revision == target && str(st, "status") != "revision_ready" ||
+			revision == target-1 && str(st, "status") == "revision_ready"
+		if str(r, "kind") == "submit" && str(obj(st, "editor_submission"), "id") == str(r, "id") && tracking {
 			r["task_status"] = st["status"]
 			r["task_revision"] = st["revision"]
 			r["task_error"] = st["error"]
 			r["review_outcome"] = st["review_outcome"]
 		}
 		delete(r, "base_markdown")
+		r["writer"] = obj(r, "plan")["writer"]
 		delete(r, "plan")
 		result = append(result, r)
 	}
@@ -171,7 +208,13 @@ func (a *App) editorView(st M) M {
 		artifacts = append(artifacts, filepath.Base(str(item, "path")))
 	}
 	plan := a.pairing()
-	return M{"task": editorTaskSummary(st), "draft": public, "requests": a.editorRequests(st), "artifacts": artifacts, "writer": plan["writer"], "reviewer": plan["reviewer"]}
+	var review M
+	for _, entry := range objects(st["review_history"]) {
+		if number(entry, "revision", 0) == number(d, "base_revision", -1) && number(entry, "round", 0) >= number(review, "round", 0) {
+			review = workspaceReview(entry)
+		}
+	}
+	return M{"task": editorTaskSummary(st), "draft": public, "requests": a.editorRequests(st), "artifacts": artifacts, "writer": plan["writer"], "reviewer": plan["reviewer"], "review": review}
 }
 func utf16Slice(s string, start, end int) string {
 	u := utf16.Encode([]rune(s))
@@ -237,8 +280,8 @@ func (a *App) acceptEditorFinal(st, r M) {
 		return
 	}
 	ensure(editorEditable(st) && number(st, "revision", 1) == number(r, "base_revision", 0), "作业状态已有变化，定稿未接收，请重新载入")
-	merge(st, M{"status": "revision_ready", "feedback": "用户已在本地编辑页提交定稿。以 owner-final/report.md 为报告正文，保留用户措辞，更新 PDF、HTML、代码包内报告和相关说明；只调整受本次修改影响的文件。用户补充：" + str(r, "instruction"), "approval_event": nil, "editor_submission": M{"id": r["id"], "revision": r["target_revision"], "accepted_at": stamp()}})
-	a.saveTask(st)
+	st["editor_submission"] = M{"id": r["id"], "revision": r["target_revision"], "accepted_at": stamp()}
+	a.queueRevision(st, "用户已在本地编辑页提交定稿。以 owner-final/report.md 为报告正文，保留用户措辞，更新受本次修改影响的交付文件。用户补充："+str(r, "instruction"))
 }
 func (a *App) decideEditorSuggestion(st, in M) M {
 	id := str(in, "id")

@@ -84,7 +84,17 @@ func (a *App) applySyncAssignment(tid string, meta M, hash string) {
 		case "submitted", "submitting", "submission_unknown", "ignored":
 		default:
 			if str(st, "source_hash") != hash || boolean(st, "source_cached") {
-				merge(st, M{"status": "revision_ready", "feedback": "课程材料或输入资料有更新，请重新核对"})
+				// A sync can arrive after the owner queued changes but before
+				// the writer starts. Keep both instructions for the same revision.
+				const updated = "课程材料或输入资料有更新，请重新核对"
+				feedback := updated
+				if pending := str(st, "feedback"); str(st, "status") == "revision_ready" && pending != "" {
+					feedback = pending
+					if !strings.HasSuffix(pending, updated) {
+						feedback += "\n" + updated
+					}
+				}
+				merge(st, M{"status": "revision_ready", "feedback": feedback})
 			}
 			merge(st, meta)
 			merge(st, M{"source_hash": hash, "source_cached": false})

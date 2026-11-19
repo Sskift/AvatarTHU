@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -79,25 +78,23 @@ func extractDocument(src, dst string) {
 		writeFile(dst, []byte(text.String()), 0600)
 	}
 }
-func (a *App) prepare(st M, job string) {
-	defer a.lock("course-materials", true)()
-	// A sync may have completed after the scheduler took the task lock. Never
-	// create a mixed input version; the durable update is applied on release.
-	if tid, hash := str(st, "task_id"), str(st, "source_hash"); tid != "" && hash != "" {
-		update := readMap(a.pendingSyncPath(tid))
-		ensure(!boolean(update, "closed") && (len(update) == 0 || str(update, "source_hash") == hash) && materialsHash(st) == hash, "课程材料已更新，正在切换到最新版本")
-	}
-	writeFile(filepath.Join(job, "input", "assignment.md"), []byte(str(st, "description")), 0600)
+func freezeMaterials(st M, materials string) {
+	assignment := filepath.Join(materials, "assignment.md")
+	writeFile(assignment, []byte(str(st, "description")), 0600)
 	for name, source := range map[string]string{"attachments": str(st, "folder"), "courseware": str(st, "courseware")} {
-		dest := filepath.Join(job, "input", name)
+		dest := filepath.Join(materials, name)
 		mkdir(dest)
 		for _, p := range visibleFiles(source) {
 			switch filepath.Base(p) {
-			case "README.md", "answer.md", "answer.final.md", "review.md":
+			case "answer.md", "answer.final.md", "review.md":
 				continue
 			}
-			target := filepath.Join(dest, relative(source, p))
-			copyFile(p, target)
+			rel := relative(source, p)
+			if name == "attachments" && rel == "README.md" && digest(p) == digest(assignment) {
+				continue // School sync mirrors the assignment description here.
+			}
+			target := filepath.Join(dest, rel)
+			copyArtifact(p, target)
 			ext := strings.ToLower(filepath.Ext(p))
 			if ext == ".pdf" || ext == ".docx" || ext == ".pptx" {
 				if e := attempt(func() { extractDocument(p, target+".txt") }); e != nil {
@@ -106,8 +103,44 @@ func (a *App) prepare(st M, job string) {
 			}
 		}
 	}
-	if previous := str(st, "previous_job"); previous != "" {
-		copyTree(filepath.Join(previous, "final"), filepath.Join(job, "previous-final"))
+}
+
+func (a *App) prepare(st M, job string) {
+	defer a.lock("course-materials", true)()
+	// A sync may have completed after the scheduler took the task lock. Never
+	// create a mixed input version; the durable update is applied on release.
+	if tid, hash := str(st, "task_id"), str(st, "source_hash"); tid != "" && hash != "" {
+		update := readMap(a.pendingSyncPath(tid))
+		ensure(!boolean(update, "closed") && (len(update) == 0 || str(update, "source_hash") == hash) && materialsHash(st) == hash, "课程材料已更新，正在切换到最新版本")
+	}
+	record := obj(st, "review_materials")
+	revision := number(st, "revision", 1)
+	materials := str(record, "path")
+	if materials == "" || number(record, "revision", 0) != revision {
+		materials = job + "-materials"
+		freezeMaterials(st, materials)
+		record = M{"path": materials, "revision": revision, "sha256": materialFingerprint(materials)}
+	} else {
+		ensure(materialFingerprint(materials) == str(record, "sha256"), "冻结的题目材料已发生变化")
+	}
+	record["job"] = job
+	st["review_materials"] = record
+	copyArtifactTree(materials, filepath.Join(job, "input"))
+	previous := str(st, "previous_job")
+	if number(st, "review_round", 1) == 1 && number(st, "revision", 1) > 1 && len(objects(st["artifacts"])) > 0 {
+		// The owner revised the published version. Its downloads remain authoritative
+		// even after a run directory has been moved, edited or removed.
+		base := strDefault(st, "output_dir", filepath.Join(a.Root, "outbox", str(st, "task_id"), fmt.Sprintf("r%d", number(st, "revision", 1)-1)))
+		for _, artifact := range objects(st["artifacts"]) {
+			path := str(artifact, "path")
+			src := inside(base, relative(base, path))
+			ensure(digest(src) == str(artifact, "sha256"), "上版冻结产物已改变，无法交给主写修改")
+			name := strings.TrimPrefix(filepath.ToSlash(strDefault(artifact, "source_path", filepath.Base(src))), "final/")
+			ensure(filepath.IsLocal(filepath.FromSlash(name)), "上版交付路径无效")
+			copyArtifact(src, filepath.Join(job, "previous-final", filepath.FromSlash(name)))
+		}
+	} else if previous != "" {
+		copyArtifactTree(filepath.Join(previous, "final"), filepath.Join(job, "previous-final"))
 	} else if exists(filepath.Join(str(st, "folder"), "answer.md")) {
 		copyFile(filepath.Join(str(st, "folder"), "answer.md"), filepath.Join(job, "previous-draft", "answer.md"))
 	}
@@ -170,9 +203,9 @@ func validateWriter(r M, job string) M {
 		ensure(strings.HasPrefix(filepath.ToSlash(p), "final/") && !seen[p], "产物必须位于 final/ 且不能重复")
 		f := inside(job, p)
 		name := filepath.Base(f)
-		ensure(name != "review.md" && name != "submission.zip" && !names[name], "产物文件名重名或保留名称")
+		ensure(!strings.EqualFold(name, "review.md") && !strings.EqualFold(name, "submission.zip") && !names[strings.ToLower(name)], "产物文件名重名或保留名称")
 		seen[p] = true
-		names[name] = true
+		names[strings.ToLower(name)] = true
 	}
 	if selected, present := r["submission_files"]; present {
 		paths := texts(selected)
@@ -250,111 +283,6 @@ func (a *App) writer(job, prompt string, plan M) M {
 	writeJSON(completed, M{"finished_at": stamp(), "hashes": hashesFor(job, append(texts(r["files"]), "review.md"))})
 	return r
 }
-func validateReview(r M) {
-	_, ok := r["approved"].(bool)
-	ensure(ok, "复审未返回明确结论")
-	_, ok = r["summary"].(string)
-	ensure(ok, "复审摘要缺失")
-	ensure(r["comments"] != nil && r["checks"] != nil && r["limitations"] != nil, "复审意见或检查记录缺失")
-	for _, m := range objects(r["comments"]) {
-		for _, k := range []string{"location", "comment", "suggestion"} {
-			_, ok := m[k].(string)
-			ensure(ok, "复审意见缺少 "+k)
-		}
-	}
-	texts(r["checks"])
-	texts(r["limitations"])
-}
-func reviewFeedback(entry M) string {
-	parts := []string{str(entry, "summary")}
-	for i, c := range objects(entry["comments"]) {
-		parts = append(parts, fmt.Sprintf("%d. 位置：%s\n问题：%s\n修改建议：%s", i+1, str(c, "location"), str(c, "comment"), str(c, "suggestion")))
-	}
-	if limits := texts(entry["limitations"]); len(limits) > 0 {
-		parts = append(parts, "复审无法确认：\n"+strings.Join(limits, "\n"))
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func checkReviewArchive(file string) {
-	if !strings.EqualFold(filepath.Ext(file), ".zip") {
-		return
-	}
-	z, err := zip.OpenReader(file)
-	check(err)
-	defer z.Close()
-	for _, member := range z.File {
-		name := filepath.Base(strings.ReplaceAll(member.Name, "\\", "/"))
-		ensure(!strings.EqualFold(name, "review.md"), "候选压缩包包含主写自查 review.md，不能传给独立复审："+filepath.Base(file))
-	}
-}
-
-func (a *App) review(st, result M, writerJob string, plan M) M {
-	files := texts(result["files"])
-	for _, rel := range files {
-		checkReviewArchive(inside(writerJob, rel))
-	}
-	hashes := hashesFor(writerJob, files)
-	candidateHash := fingerprint(hashes)
-	if _, explicit := result["submission_files"]; explicit {
-		candidateHash = fingerprint([]any{hashes, texts(result["submission_files"])})
-	}
-	for _, entry := range objects(st["review_history"]) {
-		if str(entry, "writer_job") == writerJob && str(entry, "candidate_hash") == candidateHash {
-			return entry
-		}
-	}
-	cp := obj(st, "review_attempt")
-	receipt := M{}
-	if str(cp, "writer_job") == writerJob && str(cp, "candidate_hash") == candidateHash && str(cp, "job") != "" {
-		receipt = readMap(filepath.Join(str(cp, "job"), "complete.json"))
-	}
-	if len(receipt) == 0 {
-		job := filepath.Join(filepath.Dir(writerJob), "review-"+randomID(6))
-		copyTree(filepath.Join(writerJob, "input"), filepath.Join(job, "input"))
-		mkdir(filepath.Join(job, "candidate"))
-		for _, rel := range files {
-			copyFile(inside(writerJob, rel), filepath.Join(job, "candidate", strings.TrimPrefix(filepath.ToSlash(rel), "final/")))
-		}
-		selected := texts(result["submission_files"])
-		if _, explicit := result["submission_files"]; !explicit {
-			selected = files
-		}
-		manifest := filepath.Join(job, "submission-files.json")
-		writeJSON(manifest, M{"files": selected})
-		manifestHash := digest(manifest)
-		st["status"] = "reviewing"
-		st["review_attempt"] = M{"job": job, "writer_job": writerJob, "candidate_hash": candidateHash}
-		a.saveTask(st)
-		value := a.engine(str(plan, "reviewer"), job, reviewerPrompt(job), reviewerSchema, "reviewer", plan)
-		validateReview(value)
-		ensure(digest(manifest) == manifestHash, "复审修改了提交清单，将重新开启独立复审")
-		after := M{}
-		for _, rel := range files {
-			after[rel] = digest(inside(filepath.Join(job, "candidate"), strings.TrimPrefix(filepath.ToSlash(rel), "final/")))
-		}
-		ensure(reflect.DeepEqual(after, hashes), "复审修改了候选副本，将重新开启独立复审")
-		receipt = value
-		merge(receipt, M{"id": filepath.Base(job), "revision": st["revision"], "round": st["review_round"], "writer": plan["writer"], "reviewer": plan["reviewer"], "writer_job": writerJob, "reviewer_job": job, "candidate_hash": candidateHash, "reviewed_at": stamp(), "execution": readMap(filepath.Join(job, "execution.json"))})
-		writeJSON(filepath.Join(job, "complete.json"), receipt)
-	}
-	validateReview(receipt)
-	history := objects(st["review_history"])
-	found := false
-	for _, h := range history {
-		found = found || h["id"] == receipt["id"]
-	}
-	if !found {
-		history = append(history, receipt)
-	}
-	st["review_history"] = history
-	st["review_outcome"] = "changes_requested"
-	if boolean(receipt, "approved") {
-		st["review_outcome"] = "approved"
-	}
-	a.saveTask(st)
-	return receipt
-}
 func (a *App) process(st M) {
 	switch str(st, "status") {
 	case "delivery_pending":
@@ -368,7 +296,7 @@ func (a *App) process(st M) {
 		for _, entry := range objects(st["review_history"]) {
 			if number(entry, "revision", -1) == number(st, "revision", 0) {
 				feedback = ""
-				if !boolean(entry, "approved") {
+				if !boolean(entry, "approved") || str(entry, "packaging_error") != "" {
 					feedback = reviewFeedback(entry)
 				}
 			}
@@ -397,7 +325,7 @@ func (a *App) process(st M) {
 	a.saveTask(st)
 	a.requireUnblockedTools(plan)
 	a.requirePair(plan)
-	var result M
+	var result, decision M
 	var job string
 	for {
 		check(a.Ctx.Err())
@@ -412,18 +340,25 @@ func (a *App) process(st M) {
 		merge(st, M{"job": job, "status": "working"})
 		a.saveTask(st)
 		result = a.writer(job, writerPrompt(st, job, str(plan, "writer"), strDefault(st, "review_feedback", "无")), plan)
-		decision := a.review(st, result, job, plan)
-		if boolean(decision, "approved") {
+		decision = a.review(st, result, job, plan)
+		if problem := str(decision, "packaging_error"); problem != "" {
+			result["ready"] = false
+			result["blockers"] = append(texts(result["blockers"]), "提交文件无法组装："+problem)
+		} else if boolean(decision, "approved") && (boolean(result, "ready") || len(texts(result["student_inputs"])) > 0) {
 			break
 		}
-		st["review_feedback"] = reviewFeedback(decision)
+		feedback := reviewFeedback(decision)
+		if !boolean(result, "ready") {
+			feedback += "\n\n主写尚未完成本版交付。\n" + strings.Join(texts(result["blockers"]), "\n")
+		}
+		st["review_feedback"] = feedback
 		if len(texts(result["student_inputs"])) > 0 {
 			break
 		}
 		maximum := number(plan, "max_review_rounds", 3)
 		if maximum > 0 && number(st, "review_round", 1) >= maximum {
 			result["ready"] = false
-			result["blockers"] = append(texts(result["blockers"]), fmt.Sprintf("第 %d 轮独立复审仍未通过，请查看文档末尾的意见后提出修改要求", number(st, "review_round", 1)))
+			result["blockers"] = append(texts(result["blockers"]), fmt.Sprintf("第 %d 轮仍有待处理问题，请查看本轮意见后提出修改要求", number(st, "review_round", 1)))
 			break
 		}
 		merge(st, M{"previous_job": job, "review_round": number(st, "review_round", 1) + 1, "status": "rewriting"})
@@ -435,7 +370,7 @@ func (a *App) process(st M) {
 		result["ready"] = false
 		result["blockers"] = append(texts(result["blockers"]), "未提供截止时间，需要本人核对是否可提交")
 	}
-	a.snapshot(st, result, job)
+	a.snapshot(st, result, job, decision)
 	a.deliver(st)
 }
 func (a *App) outputDir(st M) string {
@@ -444,7 +379,7 @@ func (a *App) outputDir(st M) string {
 	}
 	return filepath.Join(a.Root, "outbox", str(st, "task_id"), fmt.Sprintf("r%d", number(st, "revision", 1)))
 }
-func (a *App) snapshot(st, r M, job string) {
+func (a *App) snapshot(st, r M, job string, decision M) {
 	review := M{}
 	for _, key := range []string{"document_id", "url"} {
 		if value := str(obj(st, "review_doc"), key); value != "" {
@@ -464,22 +399,50 @@ func (a *App) snapshot(st, r M, job string) {
 		selected[p] = true
 	}
 	_, explicitSubmission := r["submission_files"]
+	_, reviewed := decision["reviewed_upload"]
+	frozenHashes := obj(decision, "artifact_hashes")
+	frozenModes := obj(decision, "artifact_modes")
+	if reviewed {
+		chosen := texts(r["files"])
+		if explicitSubmission {
+			chosen = texts(r["submission_files"])
+		}
+		ensure(len(frozenHashes) == len(texts(r["files"])) && reflect.DeepEqual(chosen, texts(decision["submission_files"])), "冻结清单与独立复审版本不一致")
+	}
 	for _, rel := range texts(r["files"]) {
-		src := inside(job, rel)
+		base, path := job, rel
+		if reviewed && obj(decision, "unreadable_files")[rel] == nil {
+			base, path = str(decision, "reviewer_job"), candidatePath(rel)
+		}
+		src := inside(base, path)
 		dst := filepath.Join(target, "artifacts", filepath.Base(src))
-		copyFile(src, dst)
-		info, err := os.Stat(src)
-		check(err)
-		check(os.Chmod(dst, info.Mode().Perm()))
-		if !explicitSubmission || selected[rel] {
+		copyArtifact(src, dst)
+		hash := digest(dst)
+		if reviewed {
+			ensure(hash == str(frozenHashes, rel) && artifactMode(dst) == number(frozenModes, rel, -1), "冻结产物与独立复审版本不一致")
+		}
+		inSubmission := !explicitSubmission || selected[rel]
+		if inSubmission {
 			files = append(files, dst)
 		}
-		artifacts = append(artifacts, M{"path": dst, "sha256": digest(dst)})
+		artifacts = append(artifacts, M{"path": dst, "sha256": hash, "source_path": rel, "in_submission": inSubmission})
 	}
 	report := filepath.Join(target, "review.md")
 	copyFile(inside(job, "review.md"), report)
 	var submission, hash any
-	if len(files) == 1 && !strings.EqualFold(filepath.Ext(files[0]), ".zip") {
+	if reviewed {
+		if rel := str(decision, "reviewed_upload"); rel != "" {
+			src := inside(str(decision, "reviewer_job"), rel)
+			dst := filepath.Join(target, "artifacts", filepath.Base(src))
+			if rel == "upload/submission.zip" {
+				dst = filepath.Join(target, "submission.zip")
+				copyArtifact(src, dst)
+			}
+			hash = digest(dst)
+			ensure(hash == str(decision, "submission_sha256"), "冻结提交文件与独立复审版本不一致")
+			submission = dst
+		}
+	} else if len(files) == 1 && !strings.EqualFold(filepath.Ext(files[0]), ".zip") {
 		submission = files[0]
 		hash = digest(files[0])
 	} else if len(files) > 0 {

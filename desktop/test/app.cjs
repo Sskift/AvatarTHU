@@ -11,10 +11,15 @@ const {promisify} = require('node:util');
 (async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'avatar-desktop-test-'));
   const token = 'b'.repeat(64), taskID = '0123456789abcdef';
-  const task = {id: taskID, title: 'Lab 1 · 信号与频谱', course: '数字信号处理', course_id: 'course1', status: 'awaiting', revision: 1, deadline: '2026-11-20 23:59', can_submit: false, artifact_count: 2};
+  const task = {id: taskID, title: 'Lab 1 · 信号与频谱', course: '数字信号处理', course_id: 'course1', status: 'awaiting', revision: 1, deadline: '2026-11-20 23:59', can_submit: true, artifact_count: 2};
   const health = {daemon: {state: 'running', phase: '等待调度'}, learn: {state: 'valid'}, lark: {enabled: false}, cli: [{tool: 'codex', state: 'ready', required: true}, {tool: 'claude', state: 'unknown', required: false}], writer: 'codex', reviewer: 'codex', poll_hours: 12, scan: {}, version: 'desktop-fixture'};
-  const overview = {courses: [{id: 'course1', name: '数字信号处理', semester: '2026-2027-1', tasks: 1}, {id: 'course2', name: '计算机图形学基础', semester: '2026-2027-1', tasks: 0}], tasks: [task], health};
+  const overview = {courses: [{id: 'course1', name: '数字信号处理', semester: '2026-2027-1', tasks: 1}, {id: 'course2', name: '计算机图形学基础', semester: '2026-2027-1', tasks: 1}], tasks: [task,{id:'0123456789abcdee',course_id:'course2',course:'计算机图形学基础',title:'Lab 2 · 曲面细分',status:'reviewing',revision:2,deadline:'2026-11-24 23:59',artifact_count:0}], health};
   const draft = {version: 1, base_revision: 1, markdown: '# 实验报告\n\n这是独立的桌面测试材料。', base_markdown: '# 实验报告\n\n这是独立的桌面测试材料。'};
+  const editorRequests = [];
+  const editorReview = {revision: 1, round: 1, approved: false, reviewer: 'codex', summary: '请补充测量单位。',
+    comments: [{location: '结果', comment: '频谱缺少单位', suggestion: '请注明频率单位'}]};
+  const editorView = () => ({task: {...task, can_submit: task.status === 'awaiting'}, draft, review: editorReview,
+    requests: editorRequests, writer: 'claude', reviewer: 'codex', artifacts: ['report.pdf','analysis.zip']});
   let writes = 0, syncs = 0, unauthorized = 0, offline = false, unavailable = false, electron;
   let heldOverview, holdNextOverview = false, overviewWaiting;
   let heldDirectory;
@@ -30,8 +35,32 @@ const {promisify} = require('node:util');
     const file = path.join(root, 'data/tasks', taskID + '.json');
     await fs.writeFile(file + '.tmp', JSON.stringify(task)); await fs.rename(file + '.tmp', file);
   };
-  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<<>>>>endobj\n4 0 obj<</Length 26>>stream\n0.5 g 30 30 240 140 re f\nendstream\nendobj\ntrailer<</Root 1 0 R>>\n%%EOF');
+  // A small single-page sample also exercises text, vector plots and the PDF font assets in the reader.
+  const plot = [
+    '0.16 0.14 0.18 rg BT /F1 11 Tf 38 352 Td (Signal processing / Lab 01) Tj ET',
+    'BT /F1 24 Tf 38 314 Td (Frequency spectrum) Tj ET',
+    '0.35 g BT /F1 12 Tf 38 285 Td (Single-sided amplitude spectrum of two sampled tones.) Tj ET',
+    '0.85 G 0.5 w 57 116 m 476 116 l 57 147 m 476 147 l 57 178 m 476 178 l 57 209 m 476 209 l S',
+    '0.45 G 1 w 57 234 m 57 88 l 476 88 l S',
+    '0.41 0.26 0.51 RG 2 w 58 90 m 122 90 l 126 97 l 130 212 l 134 98 l 138 90 l 289 90 l 294 96 l 298 172 l 302 96 l 306 90 l 475 90 l S',
+    '0.35 g BT /F1 10 Tf 57 72 Td (0) Tj 65 0 Td (440) Tj 170 0 Td (1440) Tj 143 0 Td (Hz) Tj ET',
+    'BT /F1 11 Tf 57 248 Td (Normalized amplitude) Tj ET',
+    'BT /F1 10 Tf 38 30 Td (Figure 1. Sample peaks at 440 Hz and 1440 Hz.) Tj ET'
+  ].join('\n');
+  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'+
+    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 520 380]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n'+
+    '4 0 obj<</Length '+Buffer.byteLength(plot)+'>>stream\n'+plot+'\nendstream\nendobj\n'+
+    '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF');
   const material = {course_id: 'course1', course: '数字信号处理', name: 'lecture.pdf', path: 'courseware/lecture.pdf', kind: 'courseware', size: pdf.length};
+  const report = {...material, name: 'report.pdf', path: 'homework/lab1/presentation/outputs/r1/report.pdf', kind: 'artifact', submission_member: true};
+  const project = {...report, submission_member: false, name: 'analysis.zip', path: 'homework/lab1/presentation/outputs/r1/analysis.zip'};
+  const member = {...project,name: 'main.go', member: 'src/main.go', size: 82};
+  let lastRevision;
+  const detail = () => ({...task, can_submit: task.status==='awaiting', can_revise: task.status==='awaiting', has_report_source: true,
+    workflow: {writer:'codex',reviewer:'claude',feedback:lastRevision?.instruction,round:1},
+    description: '分析声音信号的频谱。', reviews: [{revision:1,round:1,reviewer:'claude',approved:true,summary:'频谱和实验记录相符。',
+      comments:[{artifact:'report.pdf',location:'第 1 页',issue:'图中两处峰值与记录一致。'},{artifact:'analysis.zip',location:'src/main.go',issue:'空输入没有提示。',suggestion:'说明可用的输入格式。'}]}],
+    revisions: [{revision:1,files:[report,project],submission:report}], attachments: []});
   const ui = path.resolve(__dirname, '../../internal/app');
   const files = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace.css': 'workspace_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css'};
   const server = http.createServer(async (req, res) => {
@@ -84,17 +113,45 @@ const {promisify} = require('node:util');
         if (heldDirectory?.pathname === current) { const held = heldDirectory; held.started(); await held.pending; }
         return json(captured);
       }
-      if (url.pathname === '/api/workspace/preview') return json({kind: 'pdf'});
+      if (url.pathname === '/api/workspace/preview') {
+        if(url.searchParams.get('member')===member.member)return json({kind:'text',text:'package main'});
+        if(url.searchParams.get('path')===project.path)return json({kind:'zip',entries:[{name:member.member,size:member.size,file:member}]});
+        return json({kind:'pdf'});
+      }
       if (url.pathname === '/api/workspace/file') {
         res.setHeader('Content-Type', 'application/pdf');
         if (!url.searchParams.has('inline')) res.setHeader('Content-Disposition', 'attachment; filename="lecture.pdf"');
         res.end(pdf); return;
       }
-      if (url.pathname === '/api/workspace/task/' + taskID) return json({...task, description: '测试材料：分析声音信号的频谱。', reviews: [], revisions: [], attachments: []});
+      if (url.pathname === '/api/workspace/task/' + taskID) return json(detail());
+      if (url.pathname === '/api/workspace/task/' + taskID + '/revise') {
+        if(task.status!=='awaiting'||input.revision!==task.revision){res.statusCode=409;return json({error:'版本已更新'});}
+        lastRevision=input;task.status='revision_ready';await signalState();return json(detail());
+      }
       if (url.pathname === '/api/tasks') return json([task]);
-      if (url.pathname === '/api/task/' + taskID) return json({task, draft, requests: [], writer: 'Codex', reviewer: 'Codex', artifacts: []});
+      if (url.pathname === '/api/task/' + taskID) return json(editorView());
       if (url.pathname.endsWith('/render')) return json({blocks: input.blocks.map((text, i) => i === 0 ? '<h1>实验报告</h1>' : '<p>' + text.replaceAll('<', '&lt;') + '</p>')});
-      if (url.pathname.endsWith('/draft')) { writes++; draft.version++; draft.markdown = input.markdown; return json({draft}); }
+      if (url.pathname.endsWith('/draft')) { writes++; draft.version++; draft.markdown = input.markdown; return json(editorView()); }
+      if (url.pathname.endsWith('/rewrite')) {
+        assert.equal(input.version, draft.version);
+        editorRequests.unshift({...input, base_revision: draft.base_revision, kind: 'rewrite', state: 'ready', writer: 'claude',
+          selected: draft.markdown.slice(input.start, input.end), replacement: '频率单位为 Hz。'});
+        return json(editorRequests[0]);
+      }
+      if (url.pathname.endsWith('/decide')) {
+        const request = editorRequests.find(r => r.id === input.id);
+        assert.equal(input.action, 'accept');
+        draft.markdown = draft.markdown.slice(0, request.start) + request.replacement + draft.markdown.slice(request.end);
+        draft.version++;
+        request.state = 'applied';
+        return json(editorView());
+      }
+      if (url.pathname.endsWith('/submit')) {
+        assert.equal(input.version, draft.version);
+        editorRequests.unshift({...input, kind: 'submit', state: 'accepted', target_revision: task.revision+1, task_status: 'revision_ready'});
+        task.status = 'revision_ready';
+        return json(editorRequests[0]);
+      }
       res.statusCode = 404; json({error: 'missing fixture route ' + url.pathname});
     } catch (error) { res.statusCode = 500; res.end(JSON.stringify({error: error.message})); }
   });
@@ -112,7 +169,7 @@ const {promisify} = require('node:util');
     page.setDefaultTimeout(15000);
     page.on('console', message => { if (message.type() === 'error') console.error('Renderer:', message.text()); });
     const errors = []; page.on('pageerror', error => errors.push(error.message));
-    await page.getByRole('heading', {name: '现在需要关注', exact: true}).waitFor();
+    await page.getByRole('heading', {name: '等你处理', exact: true}).waitFor();
     assert.equal(new URL(page.url()).protocol, 'avatarthu:');
     assert.equal(page.url().includes(token), false);
     assert.equal(await page.evaluate(() => typeof require), 'undefined');
@@ -136,7 +193,9 @@ const {promisify} = require('node:util');
     overview.courses.push({id: 'synced-course', name: '同步发现的课程', semester: '2026-2027-1', tasks: 0});
     await signalState();
     await page.getByRole('button', {name: '同步课程', exact: true}).waitFor({timeout: 2500});
+    await page.locator('[data-nav="courses"]').click();
     await page.getByRole('heading', {name: '同步发现的课程', exact: true}).waitFor({timeout: 2500});
+    await page.locator('[data-nav="overview"]').click();
     changedAt = performance.now();
     task.status = 'reviewing'; await signalState();
     await page.getByRole('link', {name: /Lab 1.*独立复审中/}).waitFor({timeout: 2500});
@@ -147,7 +206,7 @@ const {promisify} = require('node:util');
     await requestWaiting;
     task.status = 'awaiting'; await signalState();
     await new Promise(resolve => setTimeout(resolve, 200)); heldOverview();
-    await page.getByRole('heading', {name: '有 1 份作业等你审阅', exact: true}).waitFor({timeout: 2500});
+    await page.getByRole('heading', {name: '等你处理', exact: true}).waitFor({timeout: 2500});
     await page.locator('[data-nav="files"]').click();
     await page.getByRole('link', {name:'打开目录 数字信号处理',exact:true}).waitFor();
     assert.equal(await page.locator('#directory-results .file-row').count(), 0);
@@ -211,17 +270,56 @@ const {promisify} = require('node:util');
     await page.getByRole('link', {name: '下载', exact: true}).click();
     for (let n = 0; n < 50; n++) { try { if ((await fs.stat(savedPDF)).size === pdf.length) break; } catch {} await new Promise(resolve => setTimeout(resolve, 100)); }
     assert.deepEqual(await fs.readFile(savedPDF), pdf);
-    await page.locator('[data-nav="artifacts"]').click();
-    await page.locator('#artifact-tasks').getByRole('link', {name:/Lab 1/}).waitFor();
+    await page.locator('[data-nav="overview"]').click();
+    await page.getByRole('link',{name:/已有产物/}).click();
+    await page.locator('#queue-results').getByRole('link', {name:/Lab 1/}).waitFor();
     assert.equal(await page.getByRole('heading', {name:'产物与源文件',exact:true}).count(), 0);
     assert.equal(await page.locator('#content .file-list, #file-search').count(), 0);
     if (screenshotDir) await page.screenshot({path:path.join(screenshotDir,'desktop-artifacts.png')});
     await page.locator('[data-nav="courses"]').click();
     await page.locator('.course-card').first().click();
     await page.locator('.task-row').first().click();
-    await page.getByRole('link', {name: '编辑与审阅报告', exact: true}).click();
+    await page.waitForFunction(()=>document.getElementById('artifact-pdf-count')?.textContent==='1');
+    await page.waitForFunction(()=>document.getElementById('artifact-pdf-status')?.textContent==='');
+    await page.locator('#artifact-pdf-zoom').selectOption('page');
+    await page.waitForFunction(()=>document.getElementById('artifact-pdf-status')?.textContent==='');
+    if(screenshotDir)await page.screenshot({path:path.join(screenshotDir,'desktop-review.png')});
+    assert.equal(await page.locator('#artifact-choice option').count(),2);
+    await page.getByRole('button',{name:'report.pdf',exact:true}).click();
+    await page.getByRole('button',{name:'关闭预览'}).click();
+    await page.locator('#artifact-choice').selectOption(project.path);
+    await page.getByRole('button',{name:'src/main.go',exact:true}).click();
+    await page.locator('#preview-body pre').getByText('package main',{exact:true}).waitFor();
+    assert.equal(new URL(await page.locator('#preview-download').evaluate(a=>a.href)).searchParams.get('member'),member.member);
+    await page.getByRole('button',{name:'关闭预览'}).click();
+    await page.getByRole('button',{name:'交给主写修改'}).click();
+    await page.getByLabel('修改意见',{exact:true}).fill('为源代码补充输入检查。');
+    await page.locator('#revision-review summary').click();
+    await page.getByRole('button',{name:'引用第 2 条意见'}).click();
+    const quoted='analysis.zip · src/main.go — 空输入没有提示。 说明可用的输入格式。';
+    assert.equal(await page.getByRole('checkbox',{name:'analysis.zip'}).isChecked(),true);
+    assert.equal(await page.getByRole('checkbox',{name:'report.pdf'}).isChecked(),false);
+    assert.equal(await page.locator('#revision-instruction').inputValue(),'为源代码补充输入检查。\n'+quoted);
+    await page.getByRole('button',{name:'发送修改意见'}).click();
+    await page.getByText('修改已排队',{exact:true}).waitFor();
+    assert.deepEqual(lastRevision,{revision:1,instruction:'为源代码补充输入检查。\n'+quoted,files:['analysis.zip']});
+    assert.equal(await page.locator('#ask-revision').count(),0);
+    if (screenshotDir) await page.screenshot({path:path.join(screenshotDir,'desktop-revision-queued.png')});
+    task.status='awaiting';await signalState();
+    await page.getByRole('link', {name: '编辑报告正文', exact: true}).click();
     await page.locator('#paper .report-block').first().waitFor();
     assert.equal(electron.windows().length, 1);
+    assert.equal(await page.locator('#return-task').getAttribute('href'), '/#view=task&id='+taskID);
+    assert.equal(await page.locator('#agent-tools').isHidden(), true);
+    await page.getByRole('button', {name: '引用意见'}).click();
+    await page.locator('#paper .report-block').nth(1).click();
+    assert.match(await page.locator('#instruction').inputValue(), /请注明频率单位/);
+    await page.locator('#rewrite').click();
+    await page.getByRole('button', {name: '采用建议', exact: true}).click();
+    await page.locator('#paper').getByText('频率单位为 Hz。', {exact: true}).waitFor();
+    assert.equal(editorRequests[0].selected, '这是独立的桌面测试材料。');
+    await page.getByRole('tab', {name: '修改对照', exact: true}).click();
+    assert.match(await page.locator('#diff-pane ins').innerText(), /Hz/);
     await page.getByRole('tab', {name: 'Markdown', exact: true}).click();
     await page.locator('#markdown').fill('# 实验报告\n\n已保存的桌面测试修改。');
     task.status = 'working'; await signalState();
@@ -232,6 +330,21 @@ const {promisify} = require('node:util');
     assert.equal(writes > 0, true);
     assert.match(draft.markdown, /已保存的桌面测试修改/);
     if (screenshotDir) await page.screenshot({path: path.join(screenshotDir, 'desktop-editor.png')});
+    task.status = 'awaiting'; await signalState();
+    await page.getByRole('button', {name: '交给主写更新产物'}).click();
+    // A different editor saves while the version-specific handoff is being confirmed.
+    draft.version++; draft.markdown += '\n\n另一页面的修改。';
+    task.updated_at = new Date().toISOString(); await signalState();
+    await page.locator('#submit-error').filter({hasText: '草稿已更新'}).waitFor();
+    assert.equal(await page.locator('#submit-final').isDisabled(), true);
+    await page.getByRole('button', {name: '继续编辑'}).click();
+    await page.getByRole('button', {name: '交给主写更新产物'}).click();
+    await page.getByRole('button', {name: '开始更新', exact: true}).click();
+    await page.locator('#handoff-status').filter({hasText: '第 2 版'}).waitFor();
+    assert.equal(await page.locator('#submit-open').isHidden(), true);
+    task.revision = 2; task.status = 'awaiting'; await signalState();
+    await page.locator('#stale').filter({hasText: '第 2 版'}).waitFor();
+    assert.equal(await page.locator('#submit-open').isHidden(), true);
     await page.locator('.brand').click();
     await page.locator('[data-nav="settings"]').click();
     await page.getByRole('heading', {name: '后台与连接', exact: true}).waitFor();

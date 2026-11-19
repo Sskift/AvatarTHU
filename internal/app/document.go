@@ -272,7 +272,7 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 		blocks = append(blocks, attach(p, "作业描述全文.txt"))
 	}
 	if job := str(st, "job"); job != "" {
-		originals := visibleFiles(filepath.Join(job, "input", "attachments"))
+		originals := visibleFiles(filepath.Join(reviewMaterials(st, job), "attachments"))
 		attachments := []string{}
 		for _, p := range originals {
 			if strings.HasSuffix(p, ".txt") && exists(strings.TrimSuffix(p, ".txt")) {
@@ -301,7 +301,10 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 			if isImage(p) && !strings.Contains(strings.ToLower(p), "mock") && !strings.Contains(strings.ToLower(p), "gui_interface") {
 				points = append(points, M{"artifact": filepath.Base(p), "member": "", "title": filepath.Base(p), "detail": "本版实际产物图，请结合原题核对。"})
 			} else if strings.ToLower(filepath.Ext(p)) == ".zip" {
-				pictures := previewImages(p)
+				var pictures map[string][]byte
+				if err := attempt(func() { pictures = previewImages(p) }); err != nil {
+					continue // A broken download must still be publishable for the owner to revise.
+				}
 				keys := []string{}
 				for key := range pictures {
 					keys = append(keys, key)
@@ -398,9 +401,12 @@ func (a *App) buildDocument(st M, draft string, local bool) M {
 			verdict = "通过"
 		}
 		blocks = append(blocks, fmt.Sprintf("<h2>第 %d 版 · 第 %d 轮 · %s</h2>", number(entry, "revision", 1), number(entry, "round", 1), verdict), paragraph("主写："+str(entry, "writer")+" / 复审："+str(entry, "reviewer")+" / 时间："+str(entry, "reviewed_at")), prose(str(entry, "summary")))
+		if problem := str(entry, "packaging_error"); problem != "" {
+			blocks = append(blocks, paragraph("提交文件无法组装："+problem))
+		}
 		comments := []string{}
 		for _, c := range objects(entry["comments"]) {
-			comments = append(comments, str(c, "location")+"\n"+str(c, "comment")+"\n修改建议："+str(c, "suggestion"))
+			comments = append(comments, reviewLocation(c)+"\n"+str(c, "comment")+"\n修改建议："+str(c, "suggestion"))
 		}
 		blocks = append(blocks, ordered(comments))
 		if checks := texts(entry["checks"]); len(checks) > 0 {

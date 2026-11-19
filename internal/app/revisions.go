@@ -11,14 +11,34 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
+// While agents build the next revision, output_dir still identifies the
+// delivery the owner can actually inspect.
+func publishedRevision(st M) int {
+	name := filepath.Base(str(st, "output_dir"))
+	if strings.HasPrefix(name, "r") {
+		if n, err := strconv.Atoi(name[1:]); err == nil && n > 0 {
+			return n
+		}
+	}
+	return number(st, "revision", 1)
+}
+
+// All owner revision entry points call this while holding the task lock.
+func (a *App) queueRevision(st M, feedback string) {
+	merge(st, M{"status": "revision_ready", "feedback": feedback, "approval_event": nil})
+	a.saveTask(st)
+	a.wakeEditor()
+}
+
 // Capture only published-version metadata. It is used by the reader's document,
 // never included in the independent reviewer's inputs.
 func (a *App) rememberRevision(st M) {
-	if len(objects(st["artifacts"])) == 0 {
+	if len(objects(st["artifacts"])) == 0 || publishedRevision(st) != number(st, "revision", 1) {
 		return
 	}
 	history := objects(st["revision_history"])
@@ -31,6 +51,7 @@ func (a *App) rememberRevision(st M) {
 	for _, key := range []string{"revision", "output_dir", "artifacts", "submission", "sha256", "local_review", "review_doc"} {
 		entry[key] = st[key]
 	}
+	entry["revision_notes"] = obj(st, "presentation")["revision_notes"]
 	// Detach nested maps before the next version replaces delivery metadata.
 	entry = parseMap(jsonBytes(entry))
 	st["revision_history"] = append(history, entry)

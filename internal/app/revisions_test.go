@@ -30,7 +30,7 @@ func revisionFixture(t *testing.T, a *App) M {
 	revisionZIP(filepath.Join(first, "final", "code.zip"), "package main\nfunc add(a, b int) int { return a - b }\n")
 	r["files"] = append(texts(r["files"]), "final/code.zip")
 	st["job"] = first
-	a.snapshot(st, r, first)
+	a.snapshot(st, r, first, nil)
 	a.publishLocal(st)
 	a.rememberRevision(st)
 	st["revision"] = 2
@@ -44,7 +44,7 @@ func revisionFixture(t *testing.T, a *App) M {
 		{"request": "补充边界说明", "status": "partial", "detail": "大整数溢出仍需核对。", "files": []string{"code.zip"}},
 	}
 	st["job"] = second
-	a.snapshot(st, r, second)
+	a.snapshot(st, r, second, nil)
 	a.publishLocal(st)
 	return st
 }

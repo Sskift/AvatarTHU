@@ -29,7 +29,7 @@ func TestAssignmentHasFourRootEntriesAndPreservesModifiedFinal(t *testing.T) {
 	base := str(st, "assignment_dir")
 	job := assignmentPath(base, "runs", "r1", "writer")
 	r := resultAt(job, "answer")
-	a.snapshot(st, r, job)
+	a.snapshot(st, r, job, nil)
 	entries, err := os.ReadDir(base)
 	check(err)
 	names := []string{}
@@ -54,7 +54,7 @@ func TestAssignmentHasFourRootEntriesAndPreservesModifiedFinal(t *testing.T) {
 	next := assignmentPath(base, "runs", "r2", "writer")
 	newer := resultAt(next, "new answer")
 	inMemory := fingerprint(st)
-	expectError(t, "已被修改", func() { a.snapshot(st, newer, next) })
+	expectError(t, "已被修改", func() { a.snapshot(st, newer, next, nil) })
 	if fingerprint(st) != inMemory {
 		t.Fatal("failed publication changed the scheduler's current task")
 	}
@@ -72,7 +72,7 @@ func TestAssignmentFinalAdvancesAndKeepsPreviousVersion(t *testing.T) {
 	for version, answer := range []string{"one", "two"} {
 		st["revision"] = version + 1
 		job := assignmentPath(base, "runs", string(rune('a'+version)))
-		a.snapshot(st, resultAt(job, answer), job)
+		a.snapshot(st, resultAt(job, answer), job, nil)
 	}
 	if string(readBytes(filepath.Join(base, "submission", "答案.txt"))) != "two" {
 		t.Fatal("stale final")
@@ -87,7 +87,7 @@ func TestManualFinalMatchesCLIWithoutChangingFrozenSubmission(t *testing.T) {
 	a, st := layoutFixture(t)
 	base := str(st, "assignment_dir")
 	job := assignmentPath(base, "runs", "writer")
-	a.snapshot(st, resultAt(job, "answer"), job)
+	a.snapshot(st, resultAt(job, "answer"), job, nil)
 	before := readBytes(a.taskPath(str(st, "task_id")))
 	source := assignmentPath(base, "exports", "minimal.zip")
 	writeFile(source, submissionTestArchive(t, map[string][]byte{"report.pdf": []byte("report")}), 0600)

@@ -94,7 +94,7 @@ func TestSingleArchiveSnapshotAndExportPreservePublishedState(t *testing.T) {
 	file := filepath.Join(job, "final", "project.zip")
 	writeFile(file, submissionTestArchive(t, map[string][]byte{"source.zip": inner}), 0600)
 	r["files"] = []string{"final/project.zip"}
-	a.snapshot(st, r, job)
+	a.snapshot(st, r, job, nil)
 	if filepath.Base(str(st, "submission")) != "submission.zip" {
 		t.Fatal("single archive bypassed unpacking")
 	}
@@ -109,8 +109,8 @@ func TestSingleArchiveSnapshotAndExportPreservePublishedState(t *testing.T) {
 	z, err := zip.OpenReader(exported)
 	check(err)
 	defer z.Close()
-	if len(z.File) != 1 || z.File[0].Name != "answer.txt" {
-		t.Fatal("export still contains nested archives")
+	if digest(exported) != digest(file) || len(z.File) != 1 || z.File[0].Name != "source.zip" {
+		t.Fatal("explicit download did not preserve the original project archive")
 	}
 	for _, artifact := range objects(st["artifacts"]) {
 		if !strings.HasSuffix(str(artifact, "path"), "project.zip") {
@@ -139,7 +139,7 @@ func TestSubmissionSelectionSeparatesPresentationArtifacts(t *testing.T) {
 				r["submission_files"] = append(texts(r["submission_files"]), "project.zip")
 			}
 			r = validateWriter(r, job)
-			a.snapshot(st, r, job)
+			a.snapshot(st, r, job, nil)
 			folder := filepath.Join(a.outputDir(st), "submission")
 			submissionDirectoryWantAbsent(t, filepath.Join(folder, "report.md"))
 			submissionDirectoryWantAbsent(t, filepath.Join(folder, "images"))
@@ -199,23 +199,34 @@ func TestSubmissionSelectionRequiresFreshReviewWhenSelectionChanges(t *testing.T
 	}
 }
 
-func TestReviewRejectsArchivedWriterAssessment(t *testing.T) {
-	for _, member := range []string{"review.md", "checks/review.md", `checks\REVIEW.md`} {
+func TestReviewWithholdsArchivedWriterAssessment(t *testing.T) {
+	for _, member := range []string{"review.md", "checks/review.md", `checks\REVIEW.md`, "nested.zip"} {
 		t.Run(member, func(t *testing.T) {
 			a := testApp(t)
 			st := fixture(t, a)
 			job := filepath.Join(a.Root, "writer")
 			r := resultAt(job, "answer")
 			archive := filepath.Join(job, "final", "verification.zip")
-			writeFile(archive, submissionTestArchive(t, map[string][]byte{member: []byte("PRIVATE SELF ASSESSMENT")}), 0600)
-			r["files"] = append(texts(r["files"]), "final/verification.zip")
-			a.RunModel = func(string, string, string, M, string, M) M {
-				t.Fatal("reviewer launched with archived writer assessment")
-				return nil
+			body := []byte("PRIVATE SELF ASSESSMENT")
+			if member == "nested.zip" {
+				body = submissionTestArchive(t, map[string][]byte{"review.md": body})
 			}
-			expectError(t, "主写自查", func() { a.review(st, r, job, M{"writer": "codex", "reviewer": "codex"}) })
+			writeFile(archive, submissionTestArchive(t, map[string][]byte{member: body}), 0600)
+			r["files"] = append(texts(r["files"]), "final/verification.zip")
+			a.RunModel = func(_, reviewJob, _ string, _ M, _ string, _ M) M {
+				if exists(filepath.Join(reviewJob, "candidate", "verification.zip")) || exists(filepath.Join(reviewJob, "submission", "review.md")) {
+					t.Fatal("reviewer received archived writer assessment")
+				}
+				return completedReview(false)
+			}
+			receipt := a.review(st, r, job, M{"writer": "codex", "reviewer": "codex"})
+			if !strings.Contains(reviewFeedback(receipt), "主写自查") || str(receipt, "reviewed_upload") != "" {
+				t.Fatal("writer did not receive the archive repair request")
+			}
 			writeFile(archive, submissionTestArchive(t, map[string][]byte{"report.md": []byte("answer"), "data/recording.wav": []byte("audio")}), 0600)
-			checkReviewArchive(archive)
+			if problem := checkReviewArchive(archive); problem != "" {
+				t.Fatal(problem)
+			}
 		})
 	}
 }
