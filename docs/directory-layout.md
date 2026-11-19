@@ -24,6 +24,8 @@ workspace/
 ├── source/
 ├── runs/rN/round-M/
 ├── editor/
+├── conversation.json
+├── questions/
 ├── work/activity-YYYYMMDD/
 ├── exports/rN/
 ├── submission-history/
@@ -37,6 +39,8 @@ presentation/
 ├── outputs/rN/review.md
 └── reviews/rN/
 ```
+
+工作台对话按作业保存在 `workspace/conversation.json`，记录消息、关联文件版次、接收进度与主写回复。只读提问会话与答复回执保存在 `workspace/questions/`。复审在独立目录核对作业材料与候选交付，仅主写收到用户对话。
 
 自动主写返回的 `files` 包含全部展示和编辑下载件，`submission_files` 明确选择实际提交项。两者分开；系统只将选中的文件合并为最终提交包。主写开始前保存本轮原题、附件和课件的快照。独立复审在自己的目录读取原题快照、候选下载件、提交清单和已组装的提交内容。通过后冻结这一轮实际复审的文件，新回执记录提交文件哈希。改动交付文件或提交清单会触发独立复审。旧结果没有该字段时保留原有打包行为，避免改变冻结版本。
 

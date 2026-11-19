@@ -296,6 +296,9 @@ func (a *App) review(st, result M, writerJob string, plan M) M {
 			"submission_sha256": uploadHash, "packaging_error": problem,
 			"reviewed_at": stamp(), "execution": readMap(filepath.Join(job, "execution.json")),
 		})
+		if ids := a.conversationJobMessages(st, writerJob); len(ids) > 0 {
+			receipt["owner_message_ids"] = ids
+		}
 		writeJSON(filepath.Join(job, "complete.json"), receipt)
 	}
 	validateReview(receipt)

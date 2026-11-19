@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var writerSchema = parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["ready","summary","blockers","student_inputs","files","submission_files","presentation"],"properties":{"ready":{"type":"boolean"},"summary":{"type":"string"},"blockers":{"type":"array","items":{"type":"string"}},"student_inputs":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"string"}},"presentation":{"type":"object","additionalProperties":false,"required":["assignment","highlights","checks","revision_notes"],"properties":{"assignment":{"type":"string","maxLength":4000},"checks":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":500}},"highlights":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["title","detail","artifact","member"],"properties":{"title":{"type":"string","maxLength":600},"detail":{"type":"string","maxLength":600},"artifact":{"type":"string","maxLength":600},"member":{"type":"string","maxLength":600}}}},"revision_notes":{"type":"array","maxItems":30,"items":{"type":"object","additionalProperties":false,"required":["request","status","detail","files"],"properties":{"request":{"type":"string","maxLength":500},"status":{"type":"string","enum":["addressed","partial","unresolved"]},"detail":{"type":"string","maxLength":2000},"files":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}}},"submission_files":{"type":"array","items":{"type":"string"}}}}`))
+var writerSchema = parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["ready","summary","owner_reply","blockers","student_inputs","files","submission_files","presentation"],"properties":{"ready":{"type":"boolean"},"summary":{"type":"string"},"owner_reply":{"type":"string","maxLength":6000},"blockers":{"type":"array","items":{"type":"string"}},"student_inputs":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"string"}},"presentation":{"type":"object","additionalProperties":false,"required":["assignment","highlights","checks","revision_notes"],"properties":{"assignment":{"type":"string","maxLength":4000},"checks":{"type":"array","maxItems":8,"items":{"type":"string","maxLength":500}},"highlights":{"type":"array","maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["title","detail","artifact","member"],"properties":{"title":{"type":"string","maxLength":600},"detail":{"type":"string","maxLength":600},"artifact":{"type":"string","maxLength":600},"member":{"type":"string","maxLength":600}}}},"revision_notes":{"type":"array","maxItems":30,"items":{"type":"object","additionalProperties":false,"required":["request","status","detail","files"],"properties":{"request":{"type":"string","maxLength":500},"status":{"type":"string","enum":["addressed","partial","unresolved"]},"detail":{"type":"string","maxLength":2000},"files":{"type":"array","maxItems":20,"items":{"type":"string"}}}}}}},"submission_files":{"type":"array","items":{"type":"string"}}}}`))
 var reviewerSchema = parseMap([]byte(`{"type":"object","additionalProperties":false,"required":["approved","summary","comments","checks","limitations"],"properties":{"approved":{"type":"boolean"},"summary":{"type":"string"},"comments":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["artifact","location","comment","suggestion"],"properties":{"artifact":{"type":"string"},"location":{"type":"string"},"comment":{"type":"string"},"suggestion":{"type":"string"}}}},"checks":{"type":"array","items":{"type":"string"}},"limitations":{"type":"array","items":{"type":"string"}}}}`))
 
 func validHarness(name string) bool { return name == "claude" || name == "codex" }
@@ -46,12 +46,18 @@ func (a *App) pairing() M {
 func modelCommand(executor, job string, schema, plan M) []string {
 	exe := findExecutable(executor, str(plan, executor+"_cli"))
 	ensure(exe != "", "未找到 "+executor+" CLI，请运行 avatarthu tools 查看安装方式")
+	tools := "Read,Write,Edit,Glob,Grep,Bash,WebFetch,WebSearch"
+	sandbox := "workspace-write"
+	if boolean(plan, "read_only") {
+		tools = "Read,Glob,Grep"
+		sandbox = "read-only"
+	}
 	if executor == "claude" {
-		return []string{exe, "-p", "--output-format", "json", "--json-schema", string(jsonBytes(schema)), "--permission-mode", "acceptEdits", "--permission-prompts", "none", "--safe-mode", "--allowedTools", "Read,Write,Edit,Glob,Grep,Bash,WebFetch,WebSearch", "--tools", "Read,Write,Edit,Glob,Grep,Bash,WebFetch,WebSearch", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--disable-slash-commands", "--no-session-persistence"}
+		return []string{exe, "-p", "--output-format", "stream-json", "--verbose", "--json-schema", string(jsonBytes(schema)), "--permission-mode", "acceptEdits", "--permission-prompts", "none", "--safe-mode", "--allowedTools", tools, "--tools", tools, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--disable-slash-commands", "--no-session-persistence"}
 	}
 	ensure(executor == "codex", "未知执行器")
 	writeJSON(filepath.Join(job, "output-schema.json"), schema)
-	return []string{exe, "-a", "never", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-rules", "--sandbox", "workspace-write", "--disable", "memories", "--disable", "multi_agent", "--disable", "apps", "--disable", "hooks", "--disable", "skill_search", "--enable", "skip_host_skill_discovery", "-c", "project_doc_max_bytes=0", "-c", "memories.generate_memories=false", "-c", `developer_instructions=""`, "-c", "mcp_servers={}", "--output-schema", filepath.Join(job, "output-schema.json"), "--output-last-message", filepath.Join(job, "engine-output.json"), "--json", "--color", "never", "-C", job, "-"}
+	return []string{exe, "-a", "never", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-rules", "--sandbox", sandbox, "--disable", "memories", "--disable", "multi_agent", "--disable", "apps", "--disable", "hooks", "--disable", "skill_search", "--enable", "skip_host_skill_discovery", "-c", "project_doc_max_bytes=0", "-c", "memories.generate_memories=false", "-c", `developer_instructions=""`, "-c", "mcp_servers={}", "--output-schema", filepath.Join(job, "output-schema.json"), "--output-last-message", filepath.Join(job, "engine-output.json"), "--json", "--color", "never", "-C", job, "-"}
 }
 func modelEnv() []string {
 	env := []string{}
@@ -90,6 +96,12 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 	}()
 	check(a.Ctx.Err())
 	writeJSON(a.data(executor+"-execution.json"), M{"state": "running", "tool": executor, "phase": role, "job": job, "time": stamp()})
+	return a.runHarness(executor, job, prompt, schema, role, plan)
+}
+
+// The assignment worker owns its health and scheduling state. A read-only
+// question can run alongside it without changing that state.
+func (a *App) runHarness(executor, job, prompt string, schema M, role string, plan M) M {
 	if a.RunModel != nil {
 		return a.RunModel(executor, job, prompt, schema, role, plan)
 	}
@@ -113,7 +125,9 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 	cmd.Dir = job
 	cmd.Env = modelEnv()
 	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Stdout = log
+	stdout, finishStream := observeCLI(executor, job, role, log)
+	defer finishStream()
+	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	e = cmd.Start()
 	if e != nil {
@@ -124,8 +138,11 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 	merge(proc, metadata)
 	proc["pid"] = cmd.Process.Pid
 	writeJSON(filepath.Join(job, "process.json"), proc)
-	writeJSON(a.data(executor+"-execution.json"), M{"state": "running", "tool": executor, "phase": role, "job": job, "pid": cmd.Process.Pid, "time": stamp()})
+	if role != "question" {
+		writeJSON(a.data(executor+"-execution.json"), M{"state": "running", "tool": executor, "phase": role, "job": job, "pid": cmd.Process.Pid, "time": stamp()})
+	}
 	e = cmd.Wait()
+	streamErr := finishStream()
 	check(log.Close())
 	check(stderr.Close())
 	if ctx.Err() == context.Canceled {
@@ -138,6 +155,7 @@ func (a *App) engine(executor, job, prompt string, schema M, role string, plan M
 		msg := tail(errors, 16000) + tail(output, 16000) + e.Error()
 		panic(diagnosticError(executor, msg, errors))
 	}
+	check(streamErr)
 	var result M
 	if executor == "claude" {
 		envelope := readMap(output)
@@ -196,7 +214,8 @@ final/ 禁止命名 review.md 或 submission.zip。需要继续上版时读 prev
 presentation.revision_notes 逐条填写修改意见的 request、status（addressed/partial/unresolved）、detail（改动位置、验证与未完成原因）、files（本版相关交付文件的相对路径）。没有修改意见时填空数组；不得把未处理意见标为 addressed。这些说明属于主写记录，不是独立复审结论。
 只在产物完整且已有检查足以支持交付时 ready=true；真正未完成的要求写入 blockers。后台不能显示窗口等环境限制单独写入 review.md 和 checks，不单独因此判为未完成；核心行为缺少可核对证据时仍须 ready=false。没有可用文件可用 files=[]、ready=false，但仍须 review.md。
 student_inputs 只列必须由本人提供、当前确实缺失的原始数据或现场条件，例如本人录音、设备间距和采集记录；每项明确需要提供什么。仍需补齐这些输入时 ready=false，同时在 blockers 说明影响；系统会完成一次独立复审并保留意见，然后等待本人补充，不在缺少同一输入时反复重写。代码错误、可安装依赖、可查阅资料或可自行完成的分析不属于 student_inputs，应继续解决；无此类输入时填空数组。
-最终 JSON 包含 ready、summary、blockers、student_inputs、files、submission_files、presentation。files 是 final/ 内全部独立下载件的相对路径；submission_files 是其中真正要交给老师的最小完整集合。按题目保留完整代码和必要依赖，报告采用题目要求的格式；除非题目要求，不重复提交 PDF/HTML/Markdown 多种报告、生成工具、原始数据、日志或复核记录。报告编辑源仍列在 files 中供 AvatarTHU 展示和编辑。
+owner_reply 专供作业对话：有本轮用户消息时直接回复具体处理结果与涉及文件；没有则为空字符串。
+最终 JSON 包含 ready、summary、owner_reply、blockers、student_inputs、files、submission_files、presentation。files 是 final/ 内全部独立下载件的相对路径；submission_files 是其中真正要交给老师的最小完整集合。按题目保留完整代码和必要依赖，报告采用题目要求的格式；除非题目要求，不重复提交 PDF/HTML/Markdown 多种报告、生成工具、原始数据、日志或复核记录。报告编辑源仍列在 files 中供 AvatarTHU 展示和编辑。
 presentation.assignment 用简明段落或有序列表概括题意；checks 写实际检查结果；highlights 最多三张真实产物图，每项 title/detail/artifact/member；artifact 必须在 files 内，member 为 ZIP 内图路径（直接图片留空）。没有图则空列表。界面示意图用 mock/gui_interface 名字且明确非真实截图。
 summary 写明本轮实际交付了什么，待补内容写入 blockers。
 课程：%s；作业：%s；截止：%s。

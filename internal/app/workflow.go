@@ -84,6 +84,9 @@ func freezeMaterials(st M, materials string) {
 	for name, source := range map[string]string{"attachments": str(st, "folder"), "courseware": str(st, "courseware")} {
 		dest := filepath.Join(materials, name)
 		mkdir(dest)
+		if source == "" {
+			continue
+		}
 		for _, p := range visibleFiles(source) {
 			switch filepath.Base(p) {
 			case "answer.md", "answer.final.md", "review.md":
@@ -127,7 +130,7 @@ func (a *App) prepare(st M, job string) {
 	st["review_materials"] = record
 	copyArtifactTree(materials, filepath.Join(job, "input"))
 	previous := str(st, "previous_job")
-	if number(st, "review_round", 1) == 1 && number(st, "revision", 1) > 1 && len(objects(st["artifacts"])) > 0 {
+	if number(st, "review_round", 1) == 1 && number(st, "revision", 1) > 1 && len(objects(st["artifacts"])) > 0 && (previous == "" || previous != str(st, "conversation_previous_job")) {
 		// The owner revised the published version. Its downloads remain authoritative
 		// even after a run directory has been moved, edited or removed.
 		base := strDefault(st, "output_dir", filepath.Join(a.Root, "outbox", str(st, "task_id"), fmt.Sprintf("r%d", number(st, "revision", 1)-1)))
@@ -287,6 +290,7 @@ func (a *App) process(st M) {
 	switch str(st, "status") {
 	case "delivery_pending":
 		a.deliver(st)
+		a.queuePendingConversation(st)
 		return
 	case "awaiting", "needs_student", "submitted", "submission_unknown", "submitting", "closed_remote", "approval_invalid", "ignored":
 		return
@@ -303,7 +307,7 @@ func (a *App) process(st M) {
 		}
 		st["previous_job"] = st["job"]
 		st["revision"] = number(st, "revision", 0) + 1
-		for _, k := range []string{"job", "review_attempt", "execution_plan", "review_round", "review_feedback", "review_outcome"} {
+		for _, k := range []string{"job", "review_attempt", "execution_plan", "review_round", "review_feedback", "review_outcome", "conversation_previous_job", "conversation_sealed_revision"} {
 			delete(st, k)
 		}
 		if feedback != "" {
@@ -330,7 +334,8 @@ func (a *App) process(st M) {
 	for {
 		check(a.Ctx.Err())
 		job = str(st, "job")
-		if job == "" || (!exists(filepath.Join(job, "complete.json")) && str(readMap(filepath.Join(job, "execution.json")), "completed_at") == "") {
+		fresh := job == "" || (!exists(filepath.Join(job, "complete.json")) && str(readMap(filepath.Join(job, "execution.json")), "completed_at") == "")
+		if fresh {
 			base := strDefault(st, "assignment_dir", a.data("jobs", str(st, "task_id")))
 			job = assignmentPath(base, "runs", fmt.Sprintf("r%d", number(st, "revision", 1)), fmt.Sprintf("round-%d", number(st, "review_round", 1)), "writer-"+randomID(5))
 			mkdir(job)
@@ -339,26 +344,48 @@ func (a *App) process(st M) {
 		}
 		merge(st, M{"job": job, "status": "working"})
 		a.saveTask(st)
-		result = a.writer(job, writerPrompt(st, job, str(plan, "writer"), strDefault(st, "review_feedback", "无")), plan)
+		prompt := writerPrompt(st, job, str(plan, "writer"), strDefault(st, "review_feedback", "无")) + a.writerConversation(st, job, fresh)
+		result = a.writer(job, prompt, plan)
+		a.answerConversation(st, job, result)
+		// A crash may have occurred after this candidate's review was saved.
+		// In that case replay the receipt before advancing to another round.
+		reviewed := false
+		if !fresh {
+			for _, r := range objects(st["review_history"]) {
+				if str(r, "writer_job") == job {
+					reviewed = true
+					break
+				}
+			}
+		}
+		if !reviewed && a.conversationCheckpoint(st, job, false) {
+			continue
+		}
 		decision = a.review(st, result, job, plan)
 		if problem := str(decision, "packaging_error"); problem != "" {
 			result["ready"] = false
 			result["blockers"] = append(texts(result["blockers"]), "提交文件无法组装："+problem)
-		} else if boolean(decision, "approved") && (boolean(result, "ready") || len(texts(result["student_inputs"])) > 0) {
-			break
 		}
 		feedback := reviewFeedback(decision)
 		if !boolean(result, "ready") {
 			feedback += "\n\n主写尚未完成本版交付。\n" + strings.Join(texts(result["blockers"]), "\n")
 		}
-		st["review_feedback"] = feedback
-		if len(texts(result["student_inputs"])) > 0 {
-			break
+		approved := boolean(decision, "approved") && str(decision, "packaging_error") == "" && boolean(result, "ready")
+		if !approved {
+			st["review_feedback"] = feedback
+		} else {
+			delete(st, "review_feedback")
 		}
-		maximum := number(plan, "max_review_rounds", 3)
-		if maximum > 0 && number(st, "review_round", 1) >= maximum {
-			result["ready"] = false
-			result["blockers"] = append(texts(result["blockers"]), fmt.Sprintf("第 %d 轮仍有待处理问题，请查看本轮意见后提出修改要求", number(st, "review_round", 1)))
+		needsOwner := len(texts(result["student_inputs"])) > 0
+		exhausted := reviewLimitReached(st)
+		if approved || needsOwner || exhausted {
+			if a.conversationCheckpoint(st, job, true) {
+				continue
+			}
+			if !approved && !needsOwner && exhausted {
+				result["ready"] = false
+				result["blockers"] = append(texts(result["blockers"]), fmt.Sprintf("第 %d 轮仍有待处理问题，请查看本轮意见后提出修改要求", number(st, "review_round", 1)))
+			}
 			break
 		}
 		merge(st, M{"previous_job": job, "review_round": number(st, "review_round", 1) + 1, "status": "rewriting"})
@@ -372,6 +399,7 @@ func (a *App) process(st M) {
 	}
 	a.snapshot(st, result, job, decision)
 	a.deliver(st)
+	a.queuePendingConversation(st)
 }
 func (a *App) outputDir(st M) string {
 	if d := str(st, "output_dir"); d != "" {

@@ -86,6 +86,7 @@ func (a *App) act(event M) bool {
 	}
 	defer a.lock(tid, true)()
 	st := readMap(a.taskPath(tid))
+	a.queuePendingConversation(st)
 	switch str(st, "status") {
 	case "awaiting", "needs_student", "approval_invalid":
 	default:
@@ -136,8 +137,21 @@ func (a *App) act(event M) bool {
 		a.send(receiptCard("未提交作业", str(st, "title"), safeError(e), false), "invalid:"+str(event, "event_id"))
 		return false
 	}
-	merge(st, M{"status": "submitting", "approval_event": event["event_id"], "approved_at": stamp()})
-	a.saveTask(st)
+	// School verification can take time. Accept a new instruction up to the
+	// durable upload claim, never for an already-submitting revision.
+	claimed := func() bool {
+		defer a.lock("conversation-"+tid, true)()
+		a.queuePendingConversation(st)
+		if str(st, "status") != "awaiting" {
+			return false
+		}
+		merge(st, M{"status": "submitting", "approval_event": event["event_id"], "approved_at": stamp()})
+		a.saveTask(st)
+		return true
+	}()
+	if !claimed {
+		return false
+	}
 	var receipt M
 	e = attempt(func() {
 		if a.Upload != nil {

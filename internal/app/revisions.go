@@ -52,6 +52,9 @@ func (a *App) rememberRevision(st M) {
 		entry[key] = st[key]
 	}
 	entry["revision_notes"] = obj(st, "presentation")["revision_notes"]
+	if materials := obj(st, "review_materials"); number(materials, "revision", 0) == number(st, "revision", 1) {
+		entry["review_materials"] = materials
+	}
 	// Detach nested maps before the next version replaces delivery metadata.
 	entry = parseMap(jsonBytes(entry))
 	st["revision_history"] = append(history, entry)

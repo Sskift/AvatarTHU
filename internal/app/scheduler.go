@@ -240,6 +240,9 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 	if a.syncWake == nil {
 		success = a.syncScheduled(tick)
 	}
+	if a.questionWake == nil {
+		a.processConversationQuestions(selected)
+	}
 	a.processEditorRequests(selected)
 	for _, old := range a.tasks() {
 		if a.Ctx.Err() != nil {
@@ -258,6 +261,7 @@ func (a *App) run(tick, syncOnly bool, selected string) bool {
 				a.applyTaskSync(tid)
 			}()
 			st := readMap(a.taskPath(tid))
+			a.queuePendingConversation(st)
 			status := str(st, "status")
 			if status == "awaiting" || status == "needs_student" {
 				if e := attempt(func() { a.refreshCard(st) }); e != nil {
@@ -395,13 +399,15 @@ func (a *App) daemonMode(keepaliveOnly bool) {
 		a.maintenanceLoop(ctx)
 		return
 	}
+	a.questionWake = make(chan struct{}, 1)
 	a.editorWake = make(chan struct{}, 1)
 	a.syncWake = make(chan struct{}, 1)
 	defer a.startEditor(ctx)()
 	var workers sync.WaitGroup
 	a.monitor = &daemonMonitor{app: a, phase: "等待调度", started: time.Now(), deadline: time.Now().Add(3 * time.Minute)}
 	a.monitor.beat()
-	workers.Add(4)
+	workers.Add(5)
+	go func() { defer workers.Done(); a.questionLoop(ctx) }()
 	go func() { defer workers.Done(); a.monitor.loop(ctx) }()
 	go func() { defer workers.Done(); a.eventManager(ctx) }()
 	go func() { defer workers.Done(); a.maintenanceLoop(ctx) }()

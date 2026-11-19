@@ -6,7 +6,8 @@ const harness=name=>name==='claude'?'Claude':name==='codex'?'Codex':'待配置';
 let overview={courses:[],tasks:[],health:{}}, files=[], listed=[], currentView='overview',currentID='',courseTab='tasks',renderID=0,ready=false,uploadCourse='',fileAction=null,taskAction=null,taskFilter='visible',toastTimer;
 let applyingState=null, pendingState=null, stateSequence=0, connectionError='', connectionEpoch=0, settingsDirty=false, routeFailed=false, syncRequest=false, directoryPath='', directoryData=null;
 let directoryCourse='', directoryShownKey=null, directoryLoadingTimer;
-let taskDetail=null, revisionRequest=null, selectedArtifact='', queueFilter='current';
+let taskDetail=null, selectedArtifact='', queueFilter='current', selectedPane='', activityBusy=false;
+const chatDrafts=new Map();
 const queueFilters=[['current','当前待办'],['delivered','已有产物'],['all','全部作业']];
 const directoryCache=new Map();
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
@@ -138,15 +139,16 @@ function disclosure(key,title,body){
 }
 function currentDelivery(t){return (t.revisions||[]).find(r=>Number(r.revision)===Number(t.revision||1));}
 function reviewText(value){return typeof value==='string'?value:textFrom(value);}
-function reviewBody(review,files){
- const comments=(review.comments||[]).map(c=>{
-  if(typeof c==='string')return '<li>'+esc(c)+'</li>';
+function reviewBody(review,files,canQuote=false){
+ const comments=(review.comments||[]).map((c,index)=>{
+  const cite=canQuote?'<button type="button" class="text-button cite-feedback" data-quote-comment="'+index+'">引用到对话</button>':'';
+  if(typeof c==='string')return '<li>'+esc(c)+cite+'</li>';
   const issue=c.issue||c.comment||c.description,request=c.suggestion||c.requested_change;
   const details=[c.severity,c.location||c.file].filter(Boolean).map(esc).join(' · ');
   const file=files.find(f=>f.name===c.artifact);
   const reference=file?'<button class="text-button" data-preview="'+(listed.push(file)-1)+'">'+esc(file.name)+'</button>':esc(c.artifact||'');
   return '<li>'+(details||reference?'<small>'+[reference,details].filter(Boolean).join(' · ')+'</small>':'')+
-   esc([issue,request].filter(Boolean).join('。')||(!reference&&!details?reviewText(c):''))+'</li>';
+   esc([issue,request].filter(Boolean).join('。')||(!reference&&!details?reviewText(c):''))+cite+'</li>';
  }).join('');
  const checks=(review.checks||[]).map(v=>'<li>'+esc(reviewText(v))+'</li>').join('');
  const limitations=(review.limitations||[]).map(v=>'<li>'+esc(reviewText(v))+'</li>').join('');
@@ -166,12 +168,12 @@ function revisionNotes(r){
   '<li><strong>'+esc(n.request)+'</strong> · '+esc(states[n.status]||n.status)+'<p>'+esc(n.detail)+'</p>'+
   ((n.files||[]).length?'<small>'+n.files.map(esc).join('、')+'</small>':'')+'</li>').join('')+'</ul>');
 }
-function reviewPanel(t,revision,files){
+function reviewPanel(t,revision,files,canQuote=false){
  const rounds=(t.reviews||[]).filter(r=>Number(r.revision)===Number(revision));
  const latest=rounds.at(-1);
  if(!latest)return '<p class="quiet">本版尚无已完成的复审。</p>';
  return '<div class="review-verdict">'+badge(latest.approved?'通过':'要求修改',latest.approved?'good':'bad')+
-  '<span>'+esc(harness(latest.reviewer))+' · 第 '+esc(latest.round||1)+' 轮</span></div>'+reviewBody(latest,files)+
+  '<span>'+esc(harness(latest.reviewer))+' · 第 '+esc(latest.round||1)+' 轮</span></div>'+reviewBody(latest,files,canQuote)+
   rounds.slice(0,-1).reverse().map(r=>disclosure('round-'+revision+'-'+r.round,reviewHeading(r),reviewBody(r,[]))).join('');
 }
 function deliveryFiles(r){
@@ -207,7 +209,7 @@ function updateArtifactDownload(r,file){
  }
 }
 function renderArtifactPreview(){
- const r=currentDelivery(taskDetail);
+ const r=latestDelivery(taskDetail);
  const file=deliveryFiles(r).find(f=>f.path===selectedArtifact);
  const body=$('artifact-preview');
  if(!file||!body)return;
@@ -216,8 +218,7 @@ function renderArtifactPreview(){
 }
 function workflowPanel(t){
  const w=t.workflow||{}, writer=w.writer?harness(w.writer):'',reviewer=w.reviewer?harness(w.reviewer):'';
- const stage=t.status==='reviewing'?reviewer:t.status==='working'||t.status==='rewriting'?writer:'';
- const phase=phaseNames[t.status]||t.status;
+
  let next='';
  if(t.status==='awaiting')next=overview.health.lark?.enabled?'核对产物后，可在本版飞书卡片确认提交。':'核对产物后，请自行在网络学堂提交定稿。';
  if(t.status==='revision_ready')next='主写将在第 '+(w.target_revision||Number(t.revision||1)+1)+' 版处理你的修改意见。';
@@ -225,8 +226,7 @@ function workflowPanel(t){
  if(t.status==='approval_invalid')next='请核对本版产物与提交凭据。';
  const inputs=w.student_inputs||[], blockers=(w.blockers||[]).filter(item=>!inputs.includes(item));
  const list=(title,values)=>values.length?'<h3>'+title+'</h3><ul>'+values.map(v=>'<li>'+esc(v)+'</li>').join('')+'</ul>':'';
- return '<section class="desk-status"><h2>处理进度</h2><div class="stage-line">'+badge(phase,taskTone(t))+
-  (stage?'<span>'+esc(stage)+(w.round?' · 第 '+esc(w.round)+' 轮':'')+'</span>':'')+'</div>'+(next?'<p>'+esc(next)+'</p>':'')+
+ return '<div class="desk-status"><div class="stage-line"><h2>第 '+esc(w.target_revision||t.revision||1)+' 版执行记录</h2>'+(w.round?' <span>第 '+esc(w.round)+' 轮</span>':'')+'</div>'+(next?'<p>'+esc(next)+'</p>':'')+
   (t.status==='ignored'?'<p>'+esc(t.ignored_reason||'已暂停自动处理')+(t.ignored_at?' · '+esc(date(t.ignored_at)):'')+'</p>':'')+
   (needsHelp(t)&&t.error?'<p class="error">'+esc(t.error)+'</p>':'')+
   list('需要你补充',inputs)+
@@ -235,7 +235,7 @@ function workflowPanel(t){
   (t.status==='failed'?'<a class="text-link" href="'+esc(href('settings'))+'">检查并恢复任务 ›</a>':'')+
   (writer||reviewer?'<dl class="agent-pair">'+(writer?'<div><dt>主写</dt><dd>'+esc(writer)+'</dd></div>':'')+
    (reviewer?'<div><dt>独立复审</dt><dd>'+esc(reviewer)+'</dd></div>':'')+'</dl>':'')+
-  (w.feedback?disclosure('feedback','本次修改意见','<p class="description">'+esc(w.feedback)+'</p>'):'')+'</section>';
+  (w.feedback&&!t.conversation?.messages?.length?disclosure('feedback','本次修改意见','<p class="description">'+esc(w.feedback)+'</p>'):'')+'</div>';
 }
 function taskHistory(t){
  const past=(t.revisions||[]).filter(r=>Number(r.revision)!==Number(t.revision||1));
@@ -248,90 +248,236 @@ function taskHistory(t){
   return disclosure('revision-'+n,'第 '+n+' 版',body);
  }).join('');
 }
+function latestDelivery(t){
+ return (t.revisions||[]).reduce((latest,r)=>!latest||r.revision>latest.revision?r:latest,null);
+}
+function setPane(name){
+ const changed=selectedPane!==name;
+ selectedPane=name;
+ for(const button of document.querySelectorAll('[data-pane]')){
+  const selected=button.dataset.pane===name;
+  button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;
+  $('pane-'+button.dataset.pane).hidden=!selected;
+ }
+ if(changed&&name==='workflow'&&$('activity-log'))$('activity-log').scrollTop=$('activity-log').scrollHeight;
+ if(name==='delivery'&&$('artifact-preview')&&!previews.has($('artifact-preview')))renderArtifactPreview();
+}
 function renderTask(t){
- const expanded=new Set([...document.querySelectorAll('#content details[open]')].map(el=>el.dataset.section));
- const sameVersion=taskDetail?.id===t.id&&taskDetail.revision===t.revision;
- if(!sameVersion)selectedArtifact='';
+ const continuing=taskDetail?.id===t.id&&!!$('conversation-form');
+ const expanded=new Set(continuing?[...document.querySelectorAll('#content details[open]')].map(el=>el.dataset.section):[]);
  const previousPreview=$('artifact-preview'), previousPath=selectedArtifact;
+ if(!continuing){
+  selectedArtifact='';selectedPane='';
+  $('content').replaceChildren($('task-workspace').content.cloneNode(true));
+  $('chat-text').value=draftFor(t).text;
+ }
  taskDetail=t;listed=[];
- const r=currentDelivery(t),history=taskHistory(t),workflow=t.workflow||{},doc=safeLink(t.document_url);
+ const r=latestDelivery(t),history=taskHistory(t),doc=safeLink(t.document_url);
  const reportLink='<a class="button" href="/editor#task='+encodeURIComponent(t.id)+'">'+(t.has_report_source&&t.can_submit?'编辑报告正文':'打开报告草稿')+'</a>';
- const files=r?.files||[],submission=r?.submission;
- const prompt=t.status==='needs_student'&&workflow.student_inputs?.length?'补充信息给主写':'交给主写修改';
- const actions=(t.can_revise?'<button class="primary" id="ask-revision">'+prompt+'</button>':'')+
-  (t.has_report_source&&t.can_submit?reportLink:'');
  const meta=[t.course,t.deadline?'截止 '+date(t.deadline):''].filter(Boolean).map(esc).join(' · ');
+ $('task-meta').innerHTML='<span>'+meta+'</span>'+badge(phaseNames[t.status]||t.status,taskTone(t));
+ $('task-links').innerHTML=t.has_report_source&&t.can_submit?reportLink:'';
  const materials='<div class="description">'+esc(t.description||'暂无作业描述')+'</div>'+
   (t.attachments?.length?'<h3>题目附件</h3>'+fileRows(t.attachments):'');
- const otherActions=(doc?'<a class="button" href="'+doc+'" target="_blank" rel="noopener noreferrer">飞书审阅文档 ↗</a>':'')+
+ const tools=(doc?'<a class="button" href="'+doc+'" target="_blank" rel="noopener noreferrer">飞书审阅文档 ↗</a>':'')+
   (t.course_id?'<a class="button" href="'+esc(href('course',t.course_id))+'">查看课程</a>':'')+
   (t.can_submit&&t.has_report_source?'':reportLink)+taskControls(t);
- $('content').innerHTML='<div class="desk-heading"><p>'+meta+'</p><div class="actions">'+actions+'</div></div>'+
-  '<div class="review-desk"><div class="desk-delivery"><div class="section-heading"><h2>第 '+esc(t.revision||1)+' 版产物</h2>'+
-  (submission?'<a id="submission-download" href="'+esc(fileURL(submission))+'" download>下载本版提交文件</a>':'')+'</div>'+
-  artifactViewer(r)+revisionNotes(r)+'</div><aside class="desk-context">'+workflowPanel(t)+
-  '<section><h2>独立复审</h2>'+reviewPanel(t,t.revision||1,files)+'</section></aside></div>'+
-  '<div class="desk-details">'+disclosure('materials','作业要求与附件',materials)+
+ $('task-secondary').innerHTML=disclosure('materials','作业要求与附件',materials)+
   (history?disclosure('history','历史版本',history):'')+
-  disclosure('tools','作业管理','<div class="actions">'+otherActions+'</div>')+'</div>';
- if(sameVersion)for(const el of document.querySelectorAll('#content details'))el.open=expanded.has(el.dataset.section);
+  disclosure('tools','作业管理','<div class="actions">'+tools+'</div>');
+ $('pane-delivery').innerHTML='<div class="section-heading"><h2>'+(r?'第 '+esc(r.revision)+' 版产物':'交付文件')+'</h2>'+
+  (r?.submission?'<a id="submission-download" href="'+esc(fileURL(r.submission))+'" download>下载本版提交文件</a>':'')+'</div>'+artifactViewer(r)+revisionNotes(r);
  const preview=$('artifact-preview');
- if(preview&&previousPreview&&sameVersion&&selectedArtifact===previousPath){
-  preview.replaceWith(previousPreview);updateArtifactDownload(r,deliveryFiles(r).find(f=>f.path===selectedArtifact));
- }else{
-  closeFileSurface(previousPreview);renderArtifactPreview();
+ if(continuing&&preview&&previousPreview&&selectedArtifact===previousPath){
+  preview.replaceWith(previousPreview);
+  updateArtifactDownload(r,deliveryFiles(r).find(f=>f.path===selectedArtifact));
+ }else closeFileSurface(previousPreview);
+ $('pipeline-status').innerHTML=workflowPanel(t);
+ const reviewFiles=currentDelivery(t)?.files||[];
+ $('pane-review').innerHTML='<div class="section-heading"><h2>第 '+esc(t.revision||1)+' 版独立复审</h2></div>'+
+  reviewPanel(t,t.revision||1,reviewFiles,true);
+ for(const el of document.querySelectorAll('#content details[data-section]'))el.open=expanded.has(el.dataset.section);
+ setPane(selectedPane||(!r||active(t)||t.status==='failed'?'workflow':'delivery'));
+ renderActivity(t.timeline||[]);
+ renderConversation(t);
+}
+const activityStates={active:'进行中',done:'已完成',waiting:'等待中',failed:'遇到问题'};
+const roles={writer:'主写',reviewer:'独立复审',system:'工作台'};
+function activityRow(row){
+ const byline=[row.at?date(row.at):'',row.round?'第 '+row.round+' 轮':'',
+  [roles[row.role],row.harness?harness(row.harness):''].filter(Boolean).join(' · ')].filter(Boolean);
+ const label=row.state==='done'?'':activityStates[row.state]||'';
+ return '<li class="event event-'+esc(row.state)+'"><div class="event-meta">'+esc(byline.join(' · '))+'</div><div class="event-title"><strong>'+
+  esc(row.title)+'</strong><span>'+esc(label)+'</span></div>'+
+  (row.detail?'<p>'+esc(row.detail)+'</p>':'')+
+  (row.files?.length?'<small>'+row.files.map(esc).join(' · ')+'</small>':'')+'</li>';
+}
+function renderActivity(rows){
+ const log=$('activity-log'),revision=taskDetail.workflow?.target_revision||taskDetail.revision||1;
+ const past=new Map(),current=[];
+ for(const row of rows){
+  if(!row.revision||row.revision===revision){current.push(row);continue;}
+  if(!past.has(row.revision))past.set(row.revision,[]);
+  past.get(row.revision).push(row);
  }
-}
-function revisionComment(comment){
- if(typeof comment==='string')return {text:comment};
- if(!comment)return {text:''};
- const artifact=comment.artifact||'',location=comment.location||comment.file;
- const prefix=[artifact,location].filter(Boolean).join(' · ');
- const issue=comment.issue||comment.comment||comment.description;
- const request=comment.suggestion||comment.requested_change;
- const text=[issue,request].filter(Boolean).join(' ');
- return {artifact,text:[prefix,text].filter(Boolean).join(' — ')};
-}
-function citeReviewComment(index){
- const entry=revisionRequest?.comments[index];
- if(!entry)return;
- const field=$('revision-instruction');
- field.value=[field.value.trimEnd(),entry.text].filter(Boolean).join('\n');
- for(const input of $('revision-options').querySelectorAll('input')){
-  if(input.value===entry.artifact)input.checked=true;
+ const groups=[...past].map(([rev,items])=>'<li class="past-activity"><details data-log-version="'+esc(rev)+'"><summary>第 '+
+  esc(rev)+' 版记录 · '+items.length+' 项</summary><ol>'+items.map(activityRow).join('')+'</ol></details></li>');
+ const html=groups.join('')+current.map(activityRow).join('');
+ if(log.eventHTML!==html){
+  const follow=log.scrollHeight-log.clientHeight-log.scrollTop<32;
+  const opened=[...log.querySelectorAll('details[open]')].map(d=>d.dataset.logVersion);
+  log.innerHTML=html;log.eventHTML=html;
+  for(const d of log.querySelectorAll('details'))d.open=opened.includes(d.dataset.logVersion);
+  if(follow)log.scrollTop=log.scrollHeight;
  }
- field.focus();field.setSelectionRange(field.value.length,field.value.length);
+ $('activity-hint').textContent=current.length?'':'后台尚未记录本版的执行步骤。';
 }
-function openRevision(){
- const t=taskDetail;if(!t?.can_revise)return;
- const files=currentDelivery(t)?.files||[];
- const review=(t.reviews||[]).filter(r=>Number(r.revision)===Number(t.revision||1)).at(-1);
- const comments=(review?.comments||[]).map(revisionComment).filter(c=>c.text);
- revisionRequest={id:t.id,revision:t.revision||1,comments};
- $('revision-review').hidden=!comments.length;$('revision-review').open=false;
- $('revision-review-title').textContent='引用本轮复审意见'+(comments.length?' · '+comments.length+' 条':'');
- $('revision-review-list').innerHTML=comments.map((c,i)=>'<li><span>'+esc(c.text)+'</span><button type="button" data-cite-review="'+i+'" aria-label="引用第 '+(i+1)+' 条意见">引用</button></li>').join('');
- $('revision-context').textContent=t.title+' · 第 '+revisionRequest.revision+' 版';
- $('revision-files').hidden=!files.length;
- $('revision-options').innerHTML=files.map(f=>'<label><input type="checkbox" name="files" value="'+esc(f.name)+'"> '+esc(f.name)+'</label>').join('');
- $('revision-instruction').value='';$('revision-error').hidden=true;
- $('revision-dialog').showModal();$('revision-instruction').focus();
+function draftFor(t){
+ if(!chatDrafts.has(t.id)){
+  let saved;
+  try{saved=JSON.parse(sessionStorage.getItem('task-chat-'+t.id)||'null');}catch{}
+  const draft={text:'',kind:'ask',files:[],revision:t.revision||1,fileRevision:null,id:''};
+  if(saved&&typeof saved.text==='string'&&Array.isArray(saved.files))Object.assign(draft,saved);
+  chatDrafts.set(t.id,{...draft,sending:false,error:''});
+ }
+ return chatDrafts.get(t.id);
 }
-$('revision-form').addEventListener('submit',async event=>{
- event.preventDefault();
- if(!revisionRequest||$('revision-confirm').disabled)return;
- const {id,revision}=revisionRequest,instruction=$('revision-instruction').value.trim();
- if(!instruction){$('revision-instruction').focus();return;}
- const files=[...new FormData(event.target).getAll('files')];
- $('revision-confirm').disabled=true;$('revision-error').hidden=true;
+function rememberChat(t,d){
+ const {text,files,id,revision,fileRevision,kind}=d;
  try{
-  const updated=await api('/task/'+encodeURIComponent(id)+'/revise',{revision,instruction,files});
-  $('revision-dialog').close();
-  if(currentView==='task'&&currentID===id){++renderID;renderTask(updated);}
-  toast('修改意见已交给主写');await refresh().catch(e=>disconnected(e.message));
- }catch(e){$('revision-error').textContent=e.message;$('revision-error').hidden=false;}
- finally{$('revision-confirm').disabled=false;}
-});
+  const value=text||files.length?JSON.stringify({text,files,id,revision,fileRevision,kind}):'';
+  if(d.stored===value)return;
+  if(value)sessionStorage.setItem('task-chat-'+t.id,value);
+  else sessionStorage.removeItem('task-chat-'+t.id);
+  d.stored=value;
+ }catch{}
+}
+function pinnedDelivery(t){
+ const revision=t.conversation?.file_revision;
+ return revision===undefined?latestDelivery(t):(t.revisions||[]).find(r=>r.revision===revision);
+}
+function latestComment(t,index){
+ const review=(t.reviews||[]).filter(r=>r.revision===(t.revision||1)).at(-1);
+ const c=review?.comments?.[index];if(!c)return;
+ if(typeof c==='string')return {text:c};
+ const artifact=c.artifact||'',position=[artifact,c.location||c.file].filter(Boolean).join(' · ');
+ const text=[c.issue||c.comment||c.description,c.suggestion||c.requested_change].filter(Boolean).join(' ');
+ return {artifact,text:[position,text].filter(Boolean).join(' — ')};
+}
+function citeComment(index){
+ const t=taskDetail,d=draftFor(t),c=latestComment(t,index);
+ if(!c||d.sending)return;
+ if(d.revision!==t.revision&&(d.text||d.files.length)){d.error='请先核对草稿所属版本，再引用本轮意见。';renderComposer(t);return;}
+ d.kind=t.conversation?.can_send?'change':'ask';
+ d.revision=t.revision;d.id='';d.error='';d.text=[d.text.trimEnd(),c.text].filter(Boolean).join('\n');
+ const r=pinnedDelivery(t);
+ if(r?.revision===t.revision&&r.files?.some(f=>f.name===c.artifact)&&!d.files.includes(c.artifact)){d.files.push(c.artifact);d.fileRevision=r.revision;}
+ $('chat-text').value=d.text;renderComposer(t);$('chat-text').focus();
+}
+function restoreFailedMessage(id){
+ const t=taskDetail,d=draftFor(t),m=t.conversation.messages.find(item=>item.id===id&&item.role==='user'&&item.kind==='ask'&&item.state==='error');
+ if(!m||d.sending)return;
+ if(d.text||d.files.length){d.error='请先发送或清空当前草稿，再载入这条消息。';renderComposer(t);return;}
+ Object.assign(d,{id:'',kind:m.kind,text:m.text,revision:m.revision,files:[...(m.files||[])],fileRevision:m.file_revision,error:''});
+ $('chat-text').value=d.text;renderComposer(t);$('chat-text').focus();
+}
+function renderConversation(t){
+ const log=$('conversation-log'),messages=t.conversation?.messages||[];
+ const d=draftFor(t);
+ if(d.id&&messages.some(m=>m.role==='user'&&m.id===d.id)&&!d.sending)clearSent(t,d);
+ const states={queued:'等待主写',running:'正在处理',answered:'已回复',error:'处理失败',waiting:'等待作业恢复',stopped:'作业已停止'};
+ const html=messages.length?messages.map(m=>{
+  const mine=m.role==='user';
+  const version=mine&&m.kind==='change'?(m.target_revision||m.revision):m.revision;
+  const meta=[mine?'你':('主写'+(m.writer?' · '+harness(m.writer):'')),m.created_at?date(m.created_at):''].filter(Boolean);
+  const label=[mine?(m.kind==='ask'?'提问':'修改要求'):'',version?'第 '+version+' 版':'',
+   mine?(states[m.state]||''):''].filter(Boolean);
+  return '<article class="chat-message '+(mine?'from-owner':'from-writer')+'"><header>'+meta.map(esc).join(' · ')+'</header><p>'+
+   esc(m.text)+'</p>'+(m.files?.length?'<small>关联第 '+esc(m.file_revision||m.revision)+' 版 · '+m.files.map(esc).join('、')+'</small>':'')+
+   '<footer>'+label.map(esc).join(' · ')+'</footer>'+
+   (m.error?'<div class="message-error">'+esc(m.error)+'</div>':'')+
+   (mine&&m.kind==='ask'&&m.state==='error'?'<button class="text-button" data-retry-chat="'+esc(m.id)+'">编辑并重试</button>':'')+'</article>';
+ }).join(''):'<p class="chat-empty">还没有对话。可以询问解题思路，或告诉主写要改哪份文件。</p>';
+ if(log.lastHTML!==html){
+  const bottom=log.scrollHeight-log.scrollTop-log.clientHeight<30;
+  log.innerHTML=html;log.lastHTML=html;
+  if(bottom)log.scrollTop=log.scrollHeight;
+ }
+ renderComposer(t);
+}
+function renderComposer(t){
+ const d=draftFor(t),c=t.conversation||{},r=pinnedDelivery(t);
+ if(!d.text&&!d.files.length&&!d.sending){
+  d.revision=t.revision||1;
+  if(!c.can_send&&c.can_ask)d.kind='ask';
+ }
+ const stale=d.revision!==t.revision||(d.files.length&&d.fileRevision!==r?.revision);
+ const allowed=d.kind==='ask'?c.can_ask:c.can_send;
+ for(const b of document.querySelectorAll('[data-kind]')){
+  b.disabled=d.sending||!(b.dataset.kind==='ask'?c.can_ask:c.can_send);
+  b.setAttribute('aria-pressed',String(b.dataset.kind===d.kind));
+ }
+ const input=$('chat-text');
+ input.readOnly=d.sending||(!c.can_ask&&!c.can_send&&!d.text);
+ input.placeholder=d.kind==='ask'?'询问思路、当前进展或文件内容…':'描述希望主写如何调整作业…';
+ const files=r?.files||[];
+ const choices=files.map(f=>'<label><input type="checkbox" value="'+esc(f.name)+'"> '+esc(f.name)+'</label>').join('');
+ const field=$('chat-files');
+ if(field.choices!==choices){field.innerHTML=choices;field.choices=choices;}
+ field.disabled=!!(stale||d.sending||!allowed);
+ for(const checkbox of field.querySelectorAll('input'))checkbox.checked=d.files.includes(checkbox.value);
+ $('chat-context').hidden=!files.length;
+ $('context-count').textContent=d.files.length?'已关联 '+d.files.length+' 个文件':'关联文件'+(r?' · 第 '+r.revision+' 版':'');
+ $('chat-scope').textContent=stale?'草稿来自第 '+d.revision+' 版'+(d.files.length?'，已关联 '+d.files.join('、'):'')+'。请核对当前版本。':'';
+ $('chat-scope').hidden=!stale;
+ $('chat-rebase').hidden=!stale||d.sending;
+ $('chat-rebase').textContent=d.files.length?'保留文字，重新选择本版文件':'按当前版本继续';
+ $('chat-action-note').textContent=!allowed?'当前状态无法发送这种消息。':d.kind==='ask'?'主写将回答你的问题。':active(t)?'在下一次主写时处理。':'交给主写更新产物并独立复审。';
+ $('chat-send').disabled=!!(!allowed||stale||d.sending||!d.text.trim());
+ $('chat-send').textContent=d.sending?'发送中…':'发送';
+ $('chat-error').hidden=!d.error;$('chat-error').textContent=d.error;
+ rememberChat(t,d);
+}
+function clearSent(t,d){
+ d.text='';d.files=[];d.fileRevision=null;d.id='';d.error='';d.revision=t.revision||1;
+ rememberChat(t,d);
+ if(taskDetail?.id===t.id&&$('chat-text'))$('chat-text').value='';
+}
+async function sendConversation(){
+ const t=taskDetail,d=draftFor(t);
+ if($('chat-send').disabled)return;
+ if(!d.id)d.id=Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
+ const request={id:d.id,revision:d.revision,kind:d.kind,instruction:d.text.trim(),files:[...d.files]};
+ if(d.files.length)request.file_revision=d.fileRevision;
+ d.sending=true;d.error='';renderComposer(t);
+ try{
+  const updated=await api('/task/'+encodeURIComponent(t.id)+'/conversation',request);
+  clearSent(updated,d);
+  if(currentView==='task'&&currentID===t.id){++renderID;renderTask(updated);$('conversation-log').scrollTop=$('conversation-log').scrollHeight;}
+ }catch(e){d.error=e.message;}
+ finally{
+  d.sending=false;
+  if(currentView==='task'&&currentID===t.id&&taskDetail){renderConversation(taskDetail);pollActivity();}
+ }
+}
+async function pollActivity(){
+ if(document.hidden||currentView!=='task'||!taskDetail||activityBusy)return;
+ const t=taskDetail,route=renderID;
+ const current=()=>taskDetail===t&&currentView==='task'&&route===renderID;
+ activityBusy=true;
+ try{
+  const path='/task/'+encodeURIComponent(t.id),fresh=await api(path+'/activity');
+  if(!current())return;
+  if(fresh.revision!==t.revision||fresh.status!==t.status||fresh.updated_at!==t.updated_at){
+   const updated=await api(path);
+   if(current())renderTask(updated);
+  }else{
+   t.timeline=fresh.timeline||[];t.conversation=fresh.conversation;
+   renderActivity(t.timeline);renderConversation(t);
+  }
+ }catch(e){if(current())$('activity-hint').textContent=e.message;}
+ finally{activityBusy=false;}
+}
 
 function renderSettings(h){settingsDirty=false;$('content').innerHTML='<div class="settings"><form id="settings-form" class="panel"><h2>作业处理方式</h2><div class="form-row">'+[['writer','主写'],['reviewer','复审']].map(([key,label])=>'<label>'+label+'<select name="'+key+'">'+['claude','codex'].map(c=>'<option value="'+c+'" '+(h[key]===c?'selected':'')+'>'+harness(c)+'</option>').join('')+'</select></label>').join('')+'</div><p class="hint">两者分别选择，可以相同。使用各自 CLI 的默认模型配置，每一阶段独立启动新会话。</p><label>课程同步间隔（小时）<input name="poll_hours" type="number" min="0.016667" max="8760" step="any" value="'+esc(h.poll_hours||12)+'" required></label><p class="hint">默认每 12 小时同步课程，网络学堂每 10 分钟保活。更改应用于后续任务，已开始的任务沿用启动时的分工。</p><button class="primary" type="submit">保存设置</button><span id="settings-result" class="muted" role="status"></span></form></div><div class="section-heading"><h2>运行状态</h2></div><section class="panel" id="health"></section><p class="muted" id="scan-result"></p>';}
 async function renderRoute(){
@@ -348,7 +494,7 @@ async function renderRoute(){
   if(a.dataset.nav===section)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');
  }
  taskDetail=null;selectedArtifact='';$('toast').hidden=true;closeFileSurface($('artifact-preview'));
- if($('revision-dialog').open)$('revision-dialog').close();
+
  $('back-link').hidden=currentView!=='task';$('back-link').innerHTML='<a href="'+esc(href('overview'))+'">‹ 作业审阅</a>';
  $('scan').hidden=!['overview','artifacts','courses','settings'].includes(currentView);
  $('title').textContent=titles[currentView];error('');
@@ -475,10 +621,47 @@ function previewFile(f,parent=null){
  showFileSurface($('preview-body'),f);
 }
 function editFile(f,action){fileAction={file:f,action};$('file-dialog-title').textContent=action==='rename'?'重命名补充资料':'移除补充资料';$('file-dialog-description').textContent=action==='rename'?f.name:'将「'+f.name+'」移到本机回收目录，后续作业不再引用它。';$('rename-label').hidden=action!=='rename';$('rename-input').required=action==='rename';$('rename-input').value=f.name;$('file-confirm').textContent=action==='rename'?'保存文件名':'移到回收目录';$('file-error').hidden=true;$('file-dialog').showModal();}
-document.addEventListener('click',e=>{const el=e.target.closest('button,a');if(!el)return;const d=el.dataset;if(d.close){$(d.close).close();return;}if(d.preview!==undefined){previewFile(listed[Number(d.preview)]);return;}if(d.rename!==undefined||d.remove!==undefined){editFile(listed[Number(d.rename??d.remove)],d.rename!==undefined?'rename':'remove');return;}if(d.citeReview!==undefined){citeReviewComment(Number(d.citeReview));return;}if(el.id==='ask-revision'){openRevision();return;}if(d.taskAction){editTask(d.taskId,d.taskAction);return;}if(d.upload){uploadCourse=d.upload;$('upload-input').click();return;}if(d.tab){courseTab=d.tab;const c=overview.courses.find(c=>c.id===currentID);renderCourse(c);}});
-document.addEventListener('change',e=>{if(e.target.id==='artifact-choice'){selectedArtifact=e.target.value;renderArtifactPreview();return;}if(e.target.id==='task-filter'){taskFilter=e.target.value;renderCourseTasks();}});
-document.addEventListener('input',e=>{if(e.target.id==='directory-search')renderDirectory();if(['file-search','course-filter','kind-filter'].includes(e.target.id))renderFiles();if(['course-search','semester-filter'].includes(e.target.id))renderCourseResults();});
-document.addEventListener('submit',async e=>{if(e.target.id!=='settings-form')return;e.preventDefault();const form=e.target,button=form.querySelector('button[type=submit]');button.disabled=true;try{const data=new FormData(form),h=await api('/settings',{writer:data.get('writer'),reviewer:data.get('reviewer'),poll_hours:Number(data.get('poll_hours'))});settingsDirty=[...data].some(([key,value])=>String(form.elements[key].value)!==String(value));updateHealth(h);$('settings-result').textContent='  已保存';toast('设置已保存');}catch(err){error(err.message);}finally{button.disabled=false;}});
+document.addEventListener('click',e=>{
+ const el=e.target.closest('button,a');if(!el)return;
+ const d=el.dataset;
+ if(d.close){$(d.close).close();return;}
+ if(d.preview!==undefined){previewFile(listed[Number(d.preview)]);return;}
+ if(d.rename!==undefined||d.remove!==undefined){
+  editFile(listed[Number(d.rename??d.remove)],d.rename!==undefined?'rename':'remove');return;
+ }
+ if(d.retryChat){restoreFailedMessage(d.retryChat);return;}
+ if(d.quoteComment!==undefined){citeComment(Number(d.quoteComment));return;}
+ if(d.pane){setPane(d.pane);return;}
+ if(d.kind){
+  Object.assign(draftFor(taskDetail),{kind:d.kind,id:'',error:''});
+  renderComposer(taskDetail);$('chat-text').focus();return;
+ }
+ if(el.id==='chat-rebase'){
+  Object.assign(draftFor(taskDetail),{revision:taskDetail.revision,fileRevision:null,files:[],id:'',error:''});
+  renderComposer(taskDetail);return;
+ }
+ if(d.taskAction){editTask(d.taskId,d.taskAction);return;}
+ if(d.upload){uploadCourse=d.upload;$('upload-input').click();return;}
+ if(d.tab){courseTab=d.tab;renderCourse(overview.courses.find(c=>c.id===currentID));}
+});
+document.addEventListener('change',e=>{
+ if(e.target.closest('#chat-files')){
+  const files=[...$('chat-files').querySelectorAll('input:checked')].map(el=>el.value);
+  Object.assign(draftFor(taskDetail),{files,fileRevision:pinnedDelivery(taskDetail)?.revision,id:'',error:''});
+  renderComposer(taskDetail);return;
+ }
+ if(e.target.id==='artifact-choice'){selectedArtifact=e.target.value;renderArtifactPreview();return;}
+ if(e.target.id==='task-filter'){taskFilter=e.target.value;renderCourseTasks();}
+});
+document.addEventListener('input',e=>{
+ if(e.target.id==='chat-text'){
+  Object.assign(draftFor(taskDetail),{text:e.target.value,id:'',error:''});renderComposer(taskDetail);return;
+ }
+ if(e.target.id==='directory-search')renderDirectory();
+ if(['file-search','course-filter','kind-filter'].includes(e.target.id))renderFiles();
+ if(['course-search','semester-filter'].includes(e.target.id))renderCourseResults();
+});
+document.addEventListener('submit',async e=>{if(e.target.id==='conversation-form'){e.preventDefault();await sendConversation();return;}if(e.target.id!=='settings-form')return;e.preventDefault();const form=e.target,button=form.querySelector('button[type=submit]');button.disabled=true;try{const data=new FormData(form),h=await api('/settings',{writer:data.get('writer'),reviewer:data.get('reviewer'),poll_hours:Number(data.get('poll_hours'))});settingsDirty=[...data].some(([key,value])=>String(form.elements[key].value)!==String(value));updateHealth(h);$('settings-result').textContent='  已保存';toast('设置已保存');}catch(err){error(err.message);}finally{button.disabled=false;}});
 $('file-form').addEventListener('submit',async e=>{e.preventDefault();if(!fileAction)return;const {file,action}=fileAction;$('file-confirm').disabled=true;try{const result=await api('/file-action',{course:file.course_id,path:file.path,action,name:$('rename-input').value});$('file-dialog').close();toast(result.message);await renderRoute();}catch(err){$('file-error').textContent=err.message;$('file-error').hidden=false;}finally{$('file-confirm').disabled=false;}});
 $('task-form').addEventListener('submit',async e=>{
  e.preventDefault();if(!taskAction)return;const {id,action}=taskAction;$('task-confirm').disabled=true;
@@ -493,6 +676,16 @@ $('scan').addEventListener('click',async()=>{
  catch(e){error(e.message);}
  finally{syncRequest=false;updateHealth(overview.health);if(connectionError)disconnected(connectionError);}
 });
+document.addEventListener('keydown',e=>{
+ if(e.target.hasAttribute('data-pane')&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){
+  const tabs=[...document.querySelectorAll('[data-pane]')],i=tabs.indexOf(e.target);
+  const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowLeft'?-1:1)+tabs.length)%tabs.length;
+  e.preventDefault();setPane(tabs[next].dataset.pane);tabs[next].focus();
+ }
+ if(e.target.id==='chat-text'&&!e.isComposing&&(e.ctrlKey||e.metaKey)&&e.key==='Enter'){
+  e.preventDefault();$('conversation-form').requestSubmit();
+ }
+});
 window.addEventListener('hashchange',()=>{courseTab='tasks';taskFilter='visible';renderRoute();});
 async function start(){
  const params=new URLSearchParams(location.hash.slice(1));
@@ -503,7 +696,8 @@ async function start(){
   if(window.avatarDesktop?.onState)window.avatarDesktop.onState(state=>desktopState(state).catch(e=>disconnected(e.message)));
   await refresh();
  }catch(e){disconnected(e.message);$('content').innerHTML=empty('等待连接本机后台','后台恢复后会自动重新连接。');}
- const resume=()=>{if(!document.hidden)refresh().catch(e=>disconnected(e.message));};
+ setInterval(pollActivity,2500);
+ const resume=()=>{if(!document.hidden){refresh().catch(e=>disconnected(e.message));pollActivity();}};
  document.addEventListener('visibilitychange',resume);
  window.addEventListener('focus',resume);
  if(!window.avatarDesktop?.onState)setInterval(resume,5000);

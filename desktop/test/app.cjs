@@ -56,9 +56,14 @@ const {promisify} = require('node:util');
   const project = {...report, submission_member: false, name: 'analysis.zip', path: 'homework/lab1/presentation/outputs/r1/analysis.zip'};
   const member = {...project,name: 'main.go', member: 'src/main.go', size: 82};
   let lastRevision;
+  const messages = [], timeline = [
+    {revision:1,round:1,role:'writer',harness:'codex',title:'已准备候选产物',detail:'包含报告和分析程序。',state:'done'},
+    {revision:1,round:1,role:'reviewer',harness:'claude',title:'独立复审已完成',detail:'频谱和实验记录相符。',state:'done'}
+  ];
+  const conversation = () => ({file_revision:1,can_ask:true,can_send:['working','revision_ready','awaiting','reviewing'].includes(task.status),messages});
   const detail = () => ({...task, can_submit: task.status==='awaiting', can_revise: task.status==='awaiting', has_report_source: true,
     workflow: {writer:'codex',reviewer:'claude',feedback:lastRevision?.instruction,round:1},
-    description: '分析声音信号的频谱。', reviews: [{revision:1,round:1,reviewer:'claude',approved:true,summary:'频谱和实验记录相符。',
+    conversation:conversation(),timeline,description: '分析声音信号的频谱。', reviews: [{revision:1,round:1,reviewer:'claude',approved:true,summary:'频谱和实验记录相符。',
       comments:[{artifact:'report.pdf',location:'第 1 页',issue:'图中两处峰值与记录一致。'},{artifact:'analysis.zip',location:'src/main.go',issue:'空输入没有提示。',suggestion:'说明可用的输入格式。'}]}],
     revisions: [{revision:1,files:[report,project],submission:report}], attachments: []});
   const ui = path.resolve(__dirname, '../../internal/app');
@@ -124,9 +129,18 @@ const {promisify} = require('node:util');
         res.end(pdf); return;
       }
       if (url.pathname === '/api/workspace/task/' + taskID) return json(detail());
-      if (url.pathname === '/api/workspace/task/' + taskID + '/revise') {
-        if(task.status!=='awaiting'||input.revision!==task.revision){res.statusCode=409;return json({error:'版本已更新'});}
-        lastRevision=input;task.status='revision_ready';await signalState();return json(detail());
+      if (url.pathname === '/api/workspace/task/' + taskID + '/activity') {
+        return json({id:task.id,revision:task.revision,status:task.status,updated_at:task.updated_at,timeline,conversation:conversation()});
+      }
+      if (url.pathname === '/api/workspace/task/' + taskID + '/conversation') {
+        if (input.revision!==task.revision) {res.statusCode=409;return json({error:'版本已更新'});}
+        if (!/^[a-f0-9]{32}$/.test(input.id)) throw Error('Missing idempotency key');
+        messages.push({...input,role:'user',target_revision:input.kind==='change'&&task.status==='awaiting'?task.revision+1:task.revision,text:input.instruction,state:'queued',created_at:'2026-11-19T10:00:00+08:00'});
+        if(input.kind==='change'){
+          lastRevision=input;if(task.status==='awaiting')task.status='revision_ready';
+          await signalState();
+        }
+        return json(detail());
       }
       if (url.pathname === '/api/tasks') return json([task]);
       if (url.pathname === '/api/task/' + taskID) return json(editorView());
@@ -285,26 +299,78 @@ const {promisify} = require('node:util');
     await page.waitForFunction(()=>document.getElementById('artifact-pdf-status')?.textContent==='');
     if(screenshotDir)await page.screenshot({path:path.join(screenshotDir,'desktop-review.png')});
     assert.equal(await page.locator('#artifact-choice option').count(),2);
+    await page.getByRole('tab',{name:'独立复审'}).click();
     await page.getByRole('button',{name:'report.pdf',exact:true}).click();
     await page.getByRole('button',{name:'关闭预览'}).click();
+    await page.getByRole('tab',{name:'交付文件'}).click();
     await page.locator('#artifact-choice').selectOption(project.path);
     await page.getByRole('button',{name:'src/main.go',exact:true}).click();
     await page.locator('#preview-body pre').getByText('package main',{exact:true}).waitFor();
     assert.equal(new URL(await page.locator('#preview-download').evaluate(a=>a.href)).searchParams.get('member'),member.member);
     await page.getByRole('button',{name:'关闭预览'}).click();
-    await page.getByRole('button',{name:'交给主写修改'}).click();
-    await page.getByLabel('修改意见',{exact:true}).fill('为源代码补充输入检查。');
-    await page.locator('#revision-review summary').click();
-    await page.getByRole('button',{name:'引用第 2 条意见'}).click();
+    assert.equal(await page.getByRole('button',{name:'问主写',exact:true}).getAttribute('aria-pressed'),'true');
+    await page.locator('#chat-text').fill('两个峰值的频率是如何确定的？');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.locator('#conversation-log').getByText('两个峰值的频率是如何确定的？',{exact:true}).waitFor();
+    assert.equal(task.status,'awaiting');
+    assert.equal(messages[0].kind,'ask');
+    const answer='读取采样数据后计算 FFT，对应峰值位于 440 Hz 和 1440 Hz。';
+    messages[0].state='answered';
+    messages.push({id:'reply',role:'writer',kind:'ask',text:answer,revision:1,writer:'codex',reply_to:[messages[0].id]});
+    await page.getByRole('tab',{name:'工作流'}).click();
+    await page.locator('#activity-log').getByText('独立复审已完成',{exact:true}).waitFor();
+    await page.locator('#chat-text').fill('为源代码补充输入检查。');
+    await page.evaluate(()=>{window.activeComposer=document.getElementById('chat-text');});
+    timeline.push({revision:1,round:1,role:'writer',harness:'codex',title:'已回答频谱问题',state:'done'});
+    await page.locator('#activity-log').getByText('已回答频谱问题',{exact:true}).waitFor({timeout:8000});
+    await page.locator('#conversation-log').getByText(answer,{exact:true}).waitFor();
+    assert.equal(await page.locator('#chat-text').inputValue(),'为源代码补充输入检查。');
+    assert.equal(await page.evaluate(()=>window.activeComposer===document.activeElement),true);
+    await page.getByRole('tab',{name:'独立复审'}).click();
+    await page.getByRole('button',{name:'引用到对话'}).nth(1).click();
+    assert.equal(await page.getByRole('button',{name:'调整产物',exact:true}).getAttribute('aria-pressed'),'true');
     const quoted='analysis.zip · src/main.go — 空输入没有提示。 说明可用的输入格式。';
+    await page.locator('#chat-context summary').click();
     assert.equal(await page.getByRole('checkbox',{name:'analysis.zip'}).isChecked(),true);
     assert.equal(await page.getByRole('checkbox',{name:'report.pdf'}).isChecked(),false);
-    assert.equal(await page.locator('#revision-instruction').inputValue(),'为源代码补充输入检查。\n'+quoted);
-    await page.getByRole('button',{name:'发送修改意见'}).click();
-    await page.getByText('修改已排队',{exact:true}).waitFor();
-    assert.deepEqual(lastRevision,{revision:1,instruction:'为源代码补充输入检查。\n'+quoted,files:['analysis.zip']});
-    assert.equal(await page.locator('#ask-revision').count(),0);
-    if (screenshotDir) await page.screenshot({path:path.join(screenshotDir,'desktop-revision-queued.png')});
+    assert.equal(await page.locator('#chat-text').inputValue(),'为源代码补充输入检查。\n'+quoted);
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.locator('#task-meta').getByText('修改已排队',{exact:true}).waitFor();
+    assert.deepEqual(lastRevision.files,['analysis.zip']);
+    assert.equal(lastRevision.file_revision,1);
+    assert.equal(lastRevision.instruction,'为源代码补充输入检查。\n'+quoted);
+    // A follow-up written during a revision keeps the old published file's identity.
+    await page.getByRole('tab',{name:'工作流'}).click();
+    await page.locator('#chat-text').fill('保持已有测试数据。');
+    task.revision=2;task.status='working';
+    messages.filter(m=>m.kind==='change'&&m.role==='user').forEach(m=>{m.state='running';m.target_revision=2;});
+    timeline.push(
+      {revision:2,role:'system',title:'已收到修改要求',detail:'已关联第 1 版的 analysis.zip',state:'done',at:'2026-11-19T10:00:00+08:00'},
+      {revision:2,round:1,role:'writer',harness:'codex',title:'读取作业要求与上版交付文件',state:'done',at:'2026-11-19T10:01:00+08:00'},
+      {revision:2,round:1,role:'writer',harness:'codex',title:'核对当前版源码',detail:'src/main.go',state:'active',at:'2026-11-19T10:02:00+08:00'});
+    await signalState();
+    await page.locator('#chat-rebase').waitFor();
+    assert.equal(await page.locator('#chat-send').isDisabled(),true);
+    assert.equal(await page.locator('#chat-text').inputValue(),'保持已有测试数据。');
+    await page.locator('#chat-rebase').click();
+    await page.getByRole('checkbox',{name:'analysis.zip'}).check();
+    await page.locator('#chat-context summary').click();
+    if(screenshotDir) await page.screenshot({path:path.join(screenshotDir,'desktop-workflow-dialogue.png')});
+    await page.locator('#chat-send').click();
+    await page.locator('#conversation-log').getByText('保持已有测试数据。',{exact:true}).waitFor();
+    assert.equal(lastRevision.revision,2);
+    assert.equal(lastRevision.file_revision,1);
+    const failed={id:'failed-question',role:'user',kind:'ask',text:'计算使用的采样率是多少？',files:['report.pdf'],file_revision:1,revision:2,state:'error',error:'主写暂时不可用'};
+    messages.push(failed);
+    await page.locator('#conversation-log').getByText(failed.error,{exact:true}).waitFor({timeout:8000});
+    await page.getByRole('button',{name:'编辑并重试'}).click();
+    assert.equal(await page.locator('#chat-text').inputValue(),failed.text);
+    assert.equal(await page.locator('[data-kind=ask]').getAttribute('aria-pressed'),'true');
+    await page.locator('#chat-send').click();
+    await page.waitForFunction(()=>document.getElementById('chat-text').value==='');
+    assert.notEqual(messages.at(-1).id,failed.id);
+    assert.deepEqual(messages.at(-1).files,failed.files);
+    task.revision=1;
     task.status='awaiting';await signalState();
     await page.getByRole('link', {name: '编辑报告正文', exact: true}).click();
     await page.locator('#paper .report-block').first().waitFor();

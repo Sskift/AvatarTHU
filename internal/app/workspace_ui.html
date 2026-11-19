@@ -29,18 +29,39 @@
 <dialog id="preview" aria-labelledby="preview-title"><header><div><h2 id="preview-title"></h2><small id="preview-meta"></small></div><button data-close="preview" aria-label="关闭预览">×</button></header><div id="preview-body" class="preview-surface"></div><footer><button id="preview-parent" hidden>返回压缩包</button><a id="preview-download" class="button" download>下载文件</a></footer></dialog>
 <dialog id="file-dialog"><form id="file-form"><h2 id="file-dialog-title"></h2><p id="file-dialog-description"></p><label id="rename-label">文件名<input id="rename-input" maxlength="120" autocomplete="off"></label><p id="file-error" class="error" hidden></p><div class="dialog-actions"><button type="button" data-close="file-dialog">取消</button><button class="primary" id="file-confirm">确认</button></div></form></dialog>
 <dialog id="task-dialog" aria-labelledby="task-dialog-title"><form id="task-form"><h2 id="task-dialog-title"></h2><p id="task-dialog-description"></p><label id="ignore-reason-label">忽略原因（选填）<input id="ignore-reason" maxlength="500" autocomplete="off" placeholder="本人确认无需提交"></label><p id="task-error" class="error" role="alert" hidden></p><div class="dialog-actions"><button type="button" data-close="task-dialog">取消</button><button class="primary" id="task-confirm">确认</button></div></form></dialog>
-<dialog id="revision-dialog" aria-labelledby="revision-title">
- <form id="revision-form">
-  <h2 id="revision-title">交给主写修改</h2>
-  <p id="revision-context"></p>
-  <label for="revision-instruction">修改意见</label>
-  <textarea id="revision-instruction" name="instruction" rows="5" required placeholder="写下要改的位置、预期结果，或补充作业需要的信息。"></textarea>
-  <details id="revision-review" class="disclosure" hidden><summary id="revision-review-title"></summary><ol id="revision-review-list"></ol></details>
-  <fieldset id="revision-files"><legend>关联文件（可选）</legend><div id="revision-options"></div></fieldset>
-  <p id="revision-error" class="error" role="alert" hidden></p>
-  <div class="dialog-actions"><button type="button" data-close="revision-dialog">取消</button><button id="revision-confirm" class="primary">发送修改意见</button></div>
- </form>
-</dialog>
+<template id="task-workspace">
+ <div class="desk-heading"><div id="task-meta"></div><div class="actions" id="task-links"></div></div>
+ <div class="review-desk">
+  <div class="desk-delivery">
+   <div class="task-panes" role="tablist" aria-label="作业内容">
+    <button role="tab" id="tab-workflow" aria-controls="pane-workflow" data-pane="workflow">工作流</button>
+    <button role="tab" id="tab-delivery" aria-controls="pane-delivery" data-pane="delivery">交付文件</button>
+    <button role="tab" id="tab-review" aria-controls="pane-review" data-pane="review">独立复审</button>
+   </div>
+   <section id="pane-workflow" role="tabpanel" aria-labelledby="tab-workflow"><div id="pipeline-status"></div><ol id="activity-log" aria-label="Agent 工作记录"></ol><p id="activity-hint" class="quiet" role="status"></p></section>
+   <section id="pane-delivery" role="tabpanel" aria-labelledby="tab-delivery" hidden></section>
+   <section id="pane-review" role="tabpanel" aria-labelledby="tab-review" hidden></section>
+  </div>
+  <aside class="conversation" aria-labelledby="conversation-title">
+   <header class="conversation-heading"><h2 id="conversation-title">与主写对话</h2></header>
+   <div id="conversation-log" role="log" aria-label="对话记录" aria-live="polite" aria-relevant="additions"></div>
+   <form id="conversation-form">
+    <div class="chat-modes" aria-label="消息用途" role="group">
+     <button type="button" data-kind="ask" aria-pressed="true">问主写</button>
+     <button type="button" data-kind="change" aria-pressed="false">调整产物</button>
+    </div>
+    <label class="sr-only" for="chat-text">给主写的消息</label>
+    <textarea id="chat-text" rows="3" maxlength="12000" required></textarea>
+    <details id="chat-context"><summary id="context-count">关联文件</summary><fieldset id="chat-files" aria-label="关联文件"></fieldset></details>
+    <p id="chat-scope" class="quiet"></p>
+    <button type="button" id="chat-rebase" hidden></button>
+    <p id="chat-error" class="error" role="alert" hidden></p>
+    <div class="chat-actions"><span id="chat-action-note" class="quiet"></span><button class="primary" id="chat-send" type="submit">发送</button></div>
+   </form>
+  </aside>
+ </div>
+ <div class="desk-details" id="task-secondary"></div>
+</template>
 <input id="upload-input" type="file" multiple hidden>
 </body>
 </html>

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runCodexEngineTestCLI() {
@@ -18,11 +19,24 @@ func runCodexEngineTestCLI() {
 			output = os.Args[i+1]
 		}
 	}
+	if job == "" {
+		var err error
+		job, err = os.Getwd() // Claude uses the process working directory.
+		check(err)
+	}
 	fixture := readMap(filepath.Join(job, "cli-fixture.json"))
 	if boolean(fixture, "result") {
 		writeJSON(output, M{"ready": true, "approved": true})
 	}
 	fmt.Fprint(os.Stdout, str(fixture, "events"))
+	if tail := str(fixture, "after_release"); tail != "" {
+		for deadline := time.Now().Add(15 * time.Second); !exists(filepath.Join(job, "release-fixture")); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				os.Exit(11)
+			}
+		}
+		fmt.Fprint(os.Stdout, tail)
+	}
 	fmt.Fprint(os.Stderr, str(fixture, "stderr"))
 	os.Exit(number(fixture, "exit_code", 0))
 }

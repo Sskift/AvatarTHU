@@ -241,7 +241,7 @@ func (a *App) workspaceOverview() M {
 }
 func workspaceReview(entry M) M {
 	row := M{}
-	for _, key := range []string{"id", "revision", "round", "approved", "summary", "comments", "checks", "limitations", "reviewed_at", "reviewer", "writer", "packaging_error"} {
+	for _, key := range []string{"id", "revision", "round", "approved", "summary", "comments", "checks", "limitations", "reviewed_at", "reviewer", "writer", "packaging_error", "owner_message_ids"} {
 		row[key] = entry[key]
 	}
 	return row
@@ -313,6 +313,9 @@ func (a *App) workspaceTask(id string) M {
 	st := readMap(a.taskPath(id))
 	ensure(len(st) > 0, "找不到这份作业")
 	result := editorTaskSummary(st)
+	conversation := a.conversationView(st)
+	result["conversation"] = conversation
+	result["timeline"] = a.workspaceTimeline(st, conversation)
 	merge(result, M{"description": st["description"], "deadline": st["deadline"], "summary": st["summary"], "updated_at": st["updated_at"], "reviews": []M{}, "revisions": []M{}})
 	merge(result, M{"ignored_at": st["ignored_at"], "ignored_reason": st["ignored_reason"]})
 	reviews := []M{}
@@ -499,7 +502,18 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			result = rows
 		case r.Method == "GET" && action == "directory":
 			result = a.workspaceDirectory(a.workspaceCourse(r.URL.Query().Get("course")), r.URL.Query().Get("path"))
+		case r.Method == "GET" && action == "task" && len(parts) == 5 && parts[4] == "activity":
+			st := readMap(a.taskPath(parts[3]))
+			ensure(len(st) > 0, "找不到这份作业")
+			conversation := a.conversationView(st)
+			result = M{"id": parts[3], "revision": st["revision"], "status": st["status"], "updated_at": st["updated_at"],
+				"timeline": a.workspaceTimeline(st, conversation), "conversation": conversation}
 		case r.Method == "GET" && action == "task" && len(parts) == 4:
+			result = a.workspaceTask(parts[3])
+		case r.Method == "POST" && action == "task" && len(parts) == 5 && parts[4] == "conversation":
+			var in conversationRequest
+			check(decodeWorkspaceJSON(w, r, &in))
+			a.sendConversation(parts[3], in)
 			result = a.workspaceTask(parts[3])
 		case r.Method == "POST" && action == "task" && len(parts) == 5 && parts[4] == "revise":
 			var in workspaceRevisionRequest
