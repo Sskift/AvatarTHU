@@ -42,6 +42,7 @@ function selectReviewRow(owner, key) {
  }
  if (state.answer?.path !== row.file.path || (row.group !== 'extra' && (state.answer?.member || '') !== row.file.member))
   selectReadingFile('answer', row.file.path, row.file.member);
+ owner.autoReference = !saved && (!first || state.selected !== key);
  owner.row = row; state.selected = key;
  if (row.group === 'removed') state.layout = 'changes';
  else if (row.group === 'extra' && state.layout === 'changes') state.layout = 'both';

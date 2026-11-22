@@ -144,7 +144,22 @@ function questionMarker(line, parent) {
  const part = /^(?:\(([a-z]|\d{1,2})\)|([a-z])\))/i.exec(rest);
  if (!numbered && !part) return null;
  const suffix = part ? '(' + (part[1] || part[2]).toLowerCase() + ')' : '';
- return {parent, key: String(parent || '') + suffix, label: suffix ? (parent || '') + suffix : '第 ' + parent + ' 题'};
+ return {parent, key: String(parent || '') + suffix, label: suffix ? (parent || '') + suffix : '第 ' + parent + ' 题',
+  heading:rest.slice(part?.[0].length || 0).trim().split(/[(（:：]/)[0].slice(0,15)};
+}
+// A numbered list of submission requirements describes files, not numbered answers.
+function promptReference(line) {
+ const text = line.normalize('NFKC').trim();
+ const heading = text.replace(/^(?:#{1,6}\s*|[-*•]\s*|\d{1,2}[.、)]\s*)+/g,'');
+ for (const [kind, pattern] of [
+  ['report', /^(?:实验报告|作业报告|报告文件|written report|lab report)(?=[\s(（:：。]|$)/i],
+  ['code', /^(?:实现代码|源代码|源程序|source code)(?=[\s(（:：。]|$)/i],
+  ['readme', /^readme(?:\.md|\.txt)?(?:\s*文件)?(?=[\s(（:：。]|$)/i]
+ ]) {
+  const match = heading.match(pattern);
+  if (match) return {text,kind,label:match[0]};
+ }
+ return /\.[A-Za-z][A-Za-z0-9]{0,7}\b/.test(text) ? {text} : null;
 }
 function pdfQuestionLines(page, items) {
  const viewport = page.getViewport({scale: 1});
@@ -178,7 +193,7 @@ function pdfQuestionLines(page, items) {
   return {text, y};
  });
 }
-async function pdfQuestions(pdf, current) {
+async function pdfQuestions(pdf, current, session) {
  const markers = [];
  let parent = 0;
  for (let n = 1; n <= pdf.numPages && current(); n++) {
@@ -186,6 +201,9 @@ async function pdfQuestions(pdf, current) {
   if (!current()) break;
   const content = await page.getTextContent();
   for (const line of pdfQuestionLines(page, content.items)) {
+   const ref = session.side === 'prompt' && promptReference(line.text);
+   if (ref) session.references.push({...ref,page:n,y:line.y});
+   if (ref?.kind) continue;
    const mark = questionMarker(line.text, parent);
    if (!mark) continue;
    parent = mark.parent;
@@ -207,30 +225,60 @@ function readingFiles() {
   return [pos?.path, pos?.member || ''];
  }));
 }
+function fileReferences(prompt, row) {
+ if (!row || row.group !== 'file' || !prompt?.references?.length) return [];
+ if (prompt.referencesFor === row && prompt.referenceCount === prompt.references.length) return prompt.matches;
+ const literal = value => value.replace(/[.*+?^$()|[\]\\]/g,'\\$&');
+ const full = row.name.normalize('NFKC'), base = full.split('/').pop();
+ const unique = !full.includes('/') || [...reading.rows.values()].filter(r => r.group === 'file' && r.file.name === row.file.name).length === 1;
+ const paths = [literal(full), ...(unique && full !== base ? [literal(base)] : [])];
+ const named = new RegExp('(?:^|[^a-zA-Z0-9_./-])(?:\\./)?(?:' + paths.join('|') + ')(?![a-zA-Z0-9_/-]|\\.[a-zA-Z0-9])','i');
+ const kind = /^readme(?:\.[^.]+)?$/i.test(base) ? 'readme' : /(?:report|报告)\.(?:pdf|md|docx?|html?)$/i.test(base) ? 'report' :
+  /\.(?:py|go|[cm]?[jt]sx?|c|cc|cpp|h|hpp|java|rs|m|r|ipynb|kt|cs|swift|sql|sh)$/i.test(base) ? 'code' : '';
+ const matches = [];
+ for (const [index, ref] of prompt.references.entries()) {
+  if (!named.test(ref.text) && (!kind || ref.kind !== kind)) continue;
+  matches.push({key:'file-ref-' + index, prompt:{...ref,label:ref.label || base}, fileMatch:true});
+ }
+ prompt.referencesFor = row; prompt.referenceCount = prompt.references.length; prompt.matches = matches;
+ return matches;
+}
 function updateQuestionNav() {
  if (!reading?.ready || !$('question-nav')) return;
  const nav = $('question-nav');
  const prompt = previews.get($('prompt-preview')), answer = previews.get($('artifact-preview'));
  nav.hidden = !prompt;
  $('mark-position').hidden = !prompt?.canBookmark || !answer;
- const pairs = new Map();
+ const references = fileReferences(prompt, reading.row);
+ const pairs = new Map(references.map(pair => [pair.key,pair]));
  const indexed = Array.isArray(prompt?.marks) && (!answer || Array.isArray(answer.marks));
  const answers = uniqueQuestions(answer?.marks || []);
- for (const [key, mark] of uniqueQuestions(prompt?.marks || [])) {
-  if (mark) pairs.set(key, {prompt: mark, answer: answers.get(key)});
+ const markers = prompt?.marks || [], unique = uniqueQuestions(markers);
+ for (const [i,mark] of markers.entries()) {
+  if (unique.get(mark.key)) pairs.set(mark.key, {prompt: mark, answer: answers.get(mark.key)});
+  else pairs.set(mark.key + '@' + i, {prompt:{...mark,label:mark.label + ' ' + (mark.heading || '位置 ' + (i+1))}});
  }
  const files = readingFiles();
  for (const bookmark of reading.state.bookmarks) {
-  if (bookmark.files === files) pairs.set(bookmark.key, {prompt: bookmark.prompt, answer: bookmark.answer, bookmark});
+  if (bookmark.files === files) {
+   const original = pairs.get(bookmark.key);
+   pairs.set(bookmark.key, {...original, prompt:{...original?.prompt, ...bookmark.prompt}, answer:bookmark.answer, bookmark});
+  }
  }
  if (indexed && !pairs.has(reading.state.question)) reading.state.question = '';
  reading.pairs = pairs;
+ if (reading.autoReference && !reading.state.question && Array.isArray(prompt?.marks) && references.length && prompt.jump && reading.state.layout === 'both') {
+  jumpToQuestion(references[0].key); return;
+ }
  const selected = reading.state.question || '';
- const matched = [...pairs.values()].filter(pair => pair.answer).length;
- const html = pairs.size ? '<span>已对应 ' + matched + '/' + pairs.size + ' 题</span>'  + [...pairs].map(([key, pair]) => {
-  const hint = !pair.answer && answer ? ' title="作答位置待定位" class="unpaired"' : '';
-  return '<button type="button" data-question="' + esc(key) + '" aria-pressed="' + (key === selected) + '"' + hint + '>' + esc(pair.prompt.label) + '</button>';
- }).join('') : '<span>' + (indexed ? (answer ? '可分别翻阅原题与作答。' : '原题') : '正在查找题号…') + '</span>';
+ const group = (title, entries) => !entries.length ? '' : '<span>' + title + '</span>' + entries.map(([key,pair]) => {
+  const hint = pair.fileMatch ? ' title="' + esc(pair.prompt.text) + '"' : !pair.answer && answer ? ' title="作答位置待定位" class="unpaired"' : '';
+  const page = pair.fileMatch && pair.prompt.page ? ' · p' + pair.prompt.page : '';
+  return '<button type="button" data-question="' + esc(key) + '" aria-pressed="' + (key === selected) + '"' + hint + '>' + esc(pair.prompt.label + page) + '</button>';
+ }).join('');
+ const entries = [...pairs];
+ const html = pairs.size ? group('本文件的原题要求',entries.filter(([,p]) => p.fileMatch)) + group('题号',entries.filter(([,p]) => !p.fileMatch)) :
+  '<span>' + (indexed ? (answer ? '可分别翻阅原题与作答。' : '原题') : '正在查找题号…') + '</span>';
  if (nav.contents !== html) {
   const focused = nav.contains(document.activeElement) ? document.activeElement.dataset.question : '';
   nav.innerHTML = html; nav.contents = html;
@@ -238,7 +286,7 @@ function updateQuestionNav() {
  }
  const pair = pairs.get(selected);
  const hint = $('question-hint');
- hint.hidden = !pair || !!pair.answer || !answer || !indexed;
+ hint.hidden = !pair || pair.fileMatch || !!pair.answer || !answer || !indexed;
  if (!hint.hidden) hint.textContent = '已定位到原题。作答中未识别到同一题号，可自行翻到对应位置。';
  prompt?.mark?.(pair?.prompt);
  answer?.mark?.(pair?.answer);
@@ -246,6 +294,7 @@ function updateQuestionNav() {
 function jumpToQuestion(key) {
  const pair = reading?.pairs.get(key);
  if (!pair) return;
+ reading.autoReference = false;
  reading.state.question = key;
  for (const [side, ids] of Object.entries(readerIDs)) {
   if (pair[side]) previews.get($(ids.body))?.jump?.(pair[side]);
@@ -421,7 +470,7 @@ async function previewPDF(body, session, current) {
  session.observer.observe(body);
  if (session.side) {
   session.canBookmark = true; updateQuestionNav();
-  try { session.marks = await pdfQuestions(pdf, current); } catch { session.marks = []; }
+  try { session.marks = await pdfQuestions(pdf, current, session); } catch { session.marks = []; }
   if (current()) updateQuestionNav();
  }
 }

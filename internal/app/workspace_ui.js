@@ -545,11 +545,13 @@ function showReviewText(body,session,text){
  let parent=0;
  for(const [i,line] of text.split(/\r?\n/).entries()){
   if(i)pre.append('\n');
-  const mark=questionMarker(line,parent);
-  if(!mark){pre.append(line);continue;}
-  parent=mark.parent;
+  const ref=session.side==='prompt'&&promptReference(line);
+  const mark=!ref?.kind&&questionMarker(line,parent);
+  if(!mark&&!ref){pre.append(line);continue;}
   const node=document.createElement('span');
-  node.textContent=line;pre.append(node);marks.push({...mark,node});
+  node.textContent=line;pre.append(node);
+  if(mark){parent=mark.parent;marks.push({...mark,node});}
+  if(ref)session.references.push({...ref,node});
  }
  body.append(pre);
  session.marks=marks;
@@ -566,7 +568,7 @@ function showReviewText(body,session,text){
 async function showFileSurface(body,file,options={}){
  closeFileSurface(body);
  const position=options.position||{page:1,zoom:'fit',top:0,left:0};
- const session={...options,file,position};
+ const session={...options,file,position,references:[]};
  const current=()=>body.isConnected&&previews.get(body)===session;
  previews.set(body,session);body.textContent='正在载入预览…';body.scrollTop=0;
  try{
