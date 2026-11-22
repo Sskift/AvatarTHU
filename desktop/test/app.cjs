@@ -47,12 +47,25 @@ const {promisify} = require('node:util');
     'BT /F1 11 Tf 57 248 Td (Normalized amplitude) Tj ET',
     'BT /F1 10 Tf 38 30 Td (Figure 1. Sample peaks at 440 Hz and 1440 Hz.) Tj ET'
   ].join('\n');
-  const pdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'+
-    '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 520 380]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n'+
-    '4 0 obj<</Length '+Buffer.byteLength(plot)+'>>stream\n'+plot+'\nendstream\nendobj\n'+
-    '5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF');
+  function samplePDF(pages) {
+    const objects = [
+      '<</Type/Catalog/Pages 2 0 R>>',
+      '<</Type/Pages/Kids[' + pages.map((_, i) => (4 + 2*i) + ' 0 R').join(' ') + ']/Count ' + pages.length + '>>',
+      '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>'
+    ];
+    pages.forEach((page, i) => objects.push(
+      '<</Type/Page/Parent 2 0 R/MediaBox[0 0 520 380]/Contents ' + (5 + 2*i) + ' 0 R/Resources<</Font<</F1 3 0 R>>>>>>',
+      '<</Length ' + Buffer.byteLength(page) + '>>stream\n' + page + '\nendstream'
+    ));
+    return Buffer.from('%PDF-1.4\n' + objects.map((value, i) => (i + 1) + ' 0 obj\n' + value + '\nendobj').join('\n') + '\ntrailer<</Root 1 0 R>>\n%%EOF');
+  }
+  const title = (y, text) => 'BT /F1 14 Tf 38 ' + y + ' Td (' + text + ') Tj ET';
+  const pdf = samplePDF([plot]);
+  const promptPDF = samplePDF([[title(300,'Problem 1'), title(170,'Problem 2'), title(80,'Problem 3')].join('\n')]);
+  const answerPDF = samplePDF([plot+'\n'+title(265,'1. Spectrum'), title(300,'2. Sampling')]);
   const material = {course_id: 'course1', course: '数字信号处理', name: 'lecture.pdf', path: 'courseware/lecture.pdf', kind: 'courseware', size: pdf.length};
-  const report = {...material, name: 'report.pdf', path: 'homework/lab1/presentation/outputs/r1/report.pdf', kind: 'artifact', submission_member: true};
+  const prompt = {...material, name:'problems.pdf', path:'homework/lab1/workspace/source/problems.pdf', kind:'assignment', size:promptPDF.length};
+  const report = {...material, name: 'report.pdf', path: 'homework/lab1/presentation/outputs/r1/report.pdf', kind: 'artifact', submission_member: true, size:answerPDF.length};
   const project = {...report, submission_member: false, name: 'analysis.zip', path: 'homework/lab1/presentation/outputs/r1/analysis.zip'};
   const member = {...project,name: 'main.go', member: 'src/main.go', size: 82};
   let lastRevision;
@@ -65,9 +78,9 @@ const {promisify} = require('node:util');
     workflow: {writer:'codex',reviewer:'claude',feedback:lastRevision?.instruction,round:1},
     conversation:conversation(),timeline,description: '分析声音信号的频谱。', reviews: [{revision:1,round:1,reviewer:'claude',approved:true,summary:'频谱和实验记录相符。',
       comments:[{artifact:'report.pdf',location:'第 1 页',issue:'图中两处峰值与记录一致。'},{artifact:'analysis.zip',location:'src/main.go',issue:'空输入没有提示。',suggestion:'说明可用的输入格式。'}]}],
-    revisions: [{revision:1,files:[report,project],submission:report}], attachments: []});
+    revisions: [{revision:1,files:[report,project],submission:report}], attachments: [prompt]});
   const ui = path.resolve(__dirname, '../../internal/app');
-  const files = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace.css': 'workspace_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css'};
+  const files = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace-review.js': 'workspace_review.js', '/workspace.css': 'workspace_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css'};
   const server = http.createServer(async (req, res) => {
     try {
       if (offline) { req.socket.destroy(); return; }
@@ -126,7 +139,8 @@ const {promisify} = require('node:util');
       if (url.pathname === '/api/workspace/file') {
         res.setHeader('Content-Type', 'application/pdf');
         if (!url.searchParams.has('inline')) res.setHeader('Content-Disposition', 'attachment; filename="lecture.pdf"');
-        res.end(pdf); return;
+        const filename = url.searchParams.get('path');
+        res.end(filename === prompt.path ? promptPDF : filename === report.path ? answerPDF : pdf); return;
       }
       if (url.pathname === '/api/workspace/task/' + taskID) return json(detail());
       if (url.pathname === '/api/workspace/task/' + taskID + '/activity') {
@@ -293,21 +307,60 @@ const {promisify} = require('node:util');
     await page.locator('[data-nav="courses"]').click();
     await page.locator('.course-card').first().click();
     await page.locator('.task-row').first().click();
-    await page.waitForFunction(()=>document.getElementById('artifact-pdf-count')?.textContent==='1');
-    await page.waitForFunction(()=>document.getElementById('artifact-pdf-status')?.textContent==='');
+    await page.getByRole('button',{name:'第 2 题',exact:true}).click();
+    await page.locator('#artifact-preview [aria-label="PDF 第 2 页，共 2 页"]').waitFor();
+    await page.locator('#prompt-preview [aria-label="PDF 第 1 页，共 1 页"]').waitFor();
+    assert.equal(await page.locator('#prompt-preview .pdf-location').isVisible(),true);
+    assert.equal(await page.locator('#artifact-preview .pdf-location').isVisible(),true);
     await page.locator('#artifact-pdf-zoom').selectOption('page');
     await page.waitForFunction(()=>document.getElementById('artifact-pdf-status')?.textContent==='');
+    await page.getByRole('button',{name:'只看原题',exact:true}).click();
+    assert.equal(await page.locator('#answer-reader').isHidden(),true);
+    await page.getByRole('button',{name:'对照',exact:true}).click();
+    await page.getByRole('button',{name:'引用到对话',exact:true}).click();
+    assert.match(await page.locator('#chat-text').inputValue(),/第 2 题.*problems.pdf 第 1 页.*report.pdf 第 2 页/);
+    assert.equal(messages.length,0);
+    await page.locator('#chat-context summary').click();
+    assert.equal(await page.getByRole('checkbox',{name:'report.pdf'}).isChecked(),true);
+    await page.getByRole('checkbox',{name:'report.pdf'}).uncheck();
+    await page.locator('#chat-context summary').click();
+    await page.locator('#chat-text').fill('');
+    await page.getByRole('button',{name:'返回对照位置'}).click();
+    await page.locator('[data-nav=overview]').click();
+    await page.locator('.task-row').filter({hasText:task.title}).click();
+    await page.locator('#artifact-preview [aria-label="PDF 第 2 页，共 2 页"]').waitFor();
+    await page.waitForFunction(()=>document.querySelector('#question-nav [aria-pressed=true]')?.textContent==='第 2 题');
+    assert.equal(await page.locator('#artifact-pdf-zoom').inputValue(),'page');
+    await page.getByRole('button',{name:'第 3 题',exact:true}).click();
+    await page.locator('#question-hint').waitFor();
+    await page.locator('#mark-position').click();
+    assert.equal(await page.locator('#mark-name').inputValue(),'第 3 题');
+    await page.getByRole('button',{name:'保存位置',exact:true}).click();
+    assert.equal(await page.locator('#question-hint').isHidden(),true);
+    await page.getByRole('button',{name:'第 1 题',exact:true}).click();
+    await page.locator('#artifact-preview [aria-label="PDF 第 1 页，共 2 页"]').waitFor();
+    await page.getByRole('button',{name:'第 3 题',exact:true}).click();
+    await page.locator('#artifact-preview [aria-label="PDF 第 2 页，共 2 页"]').waitFor();
+    await page.locator('#mark-position').click();
+    await page.getByRole('button',{name:'移除此标记'}).click();
+    assert.equal(await page.getByRole('button',{name:'第 3 题',exact:true}).getAttribute('title'),'作答位置待定位');
+    await page.locator('#prompt-choice').selectOption('');
+    await page.locator('#prompt-preview pre').getByText('分析声音信号的频谱。',{exact:true}).waitFor();
+    await page.locator('#prompt-choice').selectOption(prompt.path);
+    await page.getByRole('button',{name:'第 1 题',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('artifact-pdf-canvas')?.getAttribute('aria-label')==='PDF 第 1 页，共 2 页');
     if(screenshotDir)await page.screenshot({path:path.join(screenshotDir,'desktop-review.png')});
     assert.equal(await page.locator('#artifact-choice option').count(),2);
     await page.getByRole('tab',{name:'独立复审'}).click();
     await page.getByRole('button',{name:'report.pdf',exact:true}).click();
     await page.getByRole('button',{name:'关闭预览'}).click();
-    await page.getByRole('tab',{name:'交付文件'}).click();
+    await page.getByRole('tab',{name:'对照审阅'}).click();
     await page.locator('#artifact-choice').selectOption(project.path);
     await page.getByRole('button',{name:'src/main.go',exact:true}).click();
-    await page.locator('#preview-body pre').getByText('package main',{exact:true}).waitFor();
-    assert.equal(new URL(await page.locator('#preview-download').evaluate(a=>a.href)).searchParams.get('member'),member.member);
-    await page.getByRole('button',{name:'关闭预览'}).click();
+    await page.locator('#artifact-preview pre').getByText('package main',{exact:true}).waitFor();
+    assert.equal(new URL(await page.locator('#artifact-download').evaluate(a=>a.href)).searchParams.get('member'),member.member);
+    await page.locator('#answer-back').click();
+    await page.getByRole('button',{name:'src/main.go',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'问主写',exact:true}).getAttribute('aria-pressed'),'true');
     await page.locator('#chat-text').fill('两个峰值的频率是如何确定的？');
     await page.getByRole('button',{name:'发送',exact:true}).click();
