@@ -68,7 +68,13 @@ const {promisify} = require('node:util');
   const report = {...material, name: 'report.pdf', path: 'homework/lab1/presentation/outputs/r1/report.pdf', kind: 'artifact', submission_member: true, size:answerPDF.length};
   const project = {...report, submission_member: false, name: 'analysis.zip', path: 'homework/lab1/presentation/outputs/r1/analysis.zip'};
   const member = {...project,name: 'main.go', member: 'src/main.go', size: 82};
-  let lastRevision;
+  const bundle = {...report, name:'submission.zip', path:'homework/lab1/presentation/outputs/r1/submission.zip', sha256:'f'.repeat(64)};
+  let lastRevision, fileEdit, published = 1;
+  const bundleFor = n => ({...bundle, path:bundle.path.replace('/r1/', '/r' + n + '/')});
+  const entry = (name,bytes) => ({name,size:bytes,available:true});
+  const manifest = n => ({revision:n, submission:bundleFor(n), previous:n>1?bundleFor(n-1):null, baseline:n>1?'available':'first',
+    directories:['examples'], files:[entry('report.pdf',report.size),entry('src/main.go',82),entry('tools/main.go',90)].map(current=>({
+      name:current.name,current,previous:n>1?current:undefined,change:n>1&&current.name!=='tools/main.go'?'modified':n>1?'unchanged':'first'}))});
   const messages = [], timeline = [
     {revision:1,round:1,role:'writer',harness:'codex',title:'已准备候选产物',detail:'包含报告和分析程序。',state:'done'},
     {revision:1,round:1,role:'reviewer',harness:'claude',title:'独立复审已完成',detail:'频谱和实验记录相符。',state:'done'}
@@ -78,9 +84,9 @@ const {promisify} = require('node:util');
     workflow: {writer:'codex',reviewer:'claude',feedback:lastRevision?.instruction,round:1},
     conversation:conversation(),timeline,description: '分析声音信号的频谱。', reviews: [{revision:1,round:1,reviewer:'claude',approved:true,summary:'频谱和实验记录相符。',
       comments:[{artifact:'report.pdf',location:'第 1 页',issue:'图中两处峰值与记录一致。'},{artifact:'analysis.zip',location:'src/main.go',issue:'空输入没有提示。',suggestion:'说明可用的输入格式。'}]}],
-    revisions: [{revision:1,files:[report,project],submission:report}], attachments: [prompt]});
+    revisions: [{revision:published,files:[report,project],submission:bundleFor(published)}], attachments: [prompt]});
   const ui = path.resolve(__dirname, '../../internal/app');
-  const files = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace-review.js': 'workspace_review.js', '/workspace.css': 'workspace_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css'};
+  const files = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace-files.js': 'workspace_files.js', '/workspace-review.js': 'workspace_review.js', '/workspace.css': 'workspace_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css'};
   const server = http.createServer(async (req, res) => {
     try {
       if (offline) { req.socket.destroy(); return; }
@@ -132,6 +138,7 @@ const {promisify} = require('node:util');
         return json(captured);
       }
       if (url.pathname === '/api/workspace/preview') {
+        if(url.searchParams.get('member')==='tools/main.go')return json({kind:'text',text:'package tools'});
         if(url.searchParams.get('member')===member.member)return json({kind:'text',text:'package main'});
         if(url.searchParams.get('path')===project.path)return json({kind:'zip',entries:[{name:member.member,size:member.size,file:member}]});
         return json({kind:'pdf'});
@@ -140,9 +147,15 @@ const {promisify} = require('node:util');
         res.setHeader('Content-Type', 'application/pdf');
         if (!url.searchParams.has('inline')) res.setHeader('Content-Disposition', 'attachment; filename="lecture.pdf"');
         const filename = url.searchParams.get('path');
-        res.end(filename === prompt.path ? promptPDF : filename === report.path ? answerPDF : pdf); return;
+        res.end(filename === prompt.path ? promptPDF : filename === report.path || url.searchParams.get('member')==='report.pdf' ? answerPDF : pdf); return;
       }
       if (url.pathname === '/api/workspace/task/' + taskID) return json(detail());
+      if (url.pathname === '/api/workspace/task/' + taskID + '/submission-tree') return json(manifest(Number(url.searchParams.get('revision'))));
+      if (url.pathname === '/api/workspace/task/' + taskID + '/file-change')
+        return json({lines:'@ 上版 1 行 / 本版 1 行\n- package old\n+ package main'});
+      if (url.pathname === '/api/workspace/task/' + taskID + '/file-edit') {
+        fileEdit = input; task.status='revision_ready'; await signalState(); return json(detail());
+      }
       if (url.pathname === '/api/workspace/task/' + taskID + '/activity') {
         return json({id:task.id,revision:task.revision,status:task.status,updated_at:task.updated_at,timeline,conversation:conversation()});
       }
@@ -316,7 +329,7 @@ const {promisify} = require('node:util');
     await page.waitForFunction(()=>document.getElementById('artifact-pdf-status')?.textContent==='');
     await page.getByRole('button',{name:'只看原题',exact:true}).click();
     assert.equal(await page.locator('#answer-reader').isHidden(),true);
-    await page.getByRole('button',{name:'对照',exact:true}).click();
+    await page.getByRole('button',{name:'题目对照',exact:true}).click();
     await page.getByRole('button',{name:'引用到对话',exact:true}).click();
     assert.match(await page.locator('#chat-text').inputValue(),/第 2 题.*problems.pdf 第 1 页.*report.pdf 第 2 页/);
     assert.equal(messages.length,0);
@@ -350,17 +363,37 @@ const {promisify} = require('node:util');
     await page.getByRole('button',{name:'第 1 题',exact:true}).click();
     await page.waitForFunction(()=>document.getElementById('artifact-pdf-canvas')?.getAttribute('aria-label')==='PDF 第 1 页，共 2 页');
     if(screenshotDir)await page.screenshot({path:path.join(screenshotDir,'desktop-review.png')});
-    assert.equal(await page.locator('#artifact-choice option').count(),2);
+    assert.equal(await page.locator('#submission-tree [data-review-file]').count(),3);
+    assert.match(await page.locator('#tree-count').innerText(), /3 个文件/);
+    await page.locator('#submission-tree').getByRole('button',{name:'tools/main.go',exact:true}).click();
+    await page.locator('#artifact-preview pre').getByText('package tools',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'文件内容',exact:true}).click();
+    assert.equal(await page.locator('#prompt-reader').isHidden(),true);
+    await page.locator('#edit-text').click();
+    await page.locator('#text-edit-content').fill('package student');
+    await page.getByRole('button',{name:'关闭草稿'}).click();
+    await page.locator('#edit-text').click();
+    assert.equal(await page.locator('#text-edit-content').inputValue(),'package student');
+    await page.getByRole('button',{name:'关闭草稿'}).click();
+    await page.locator('#submission-tree').getByRole('button',{name:'src/main.go',exact:true}).click();
+    await page.locator('#artifact-preview pre').getByText('package main',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'版本改动',exact:true}).click();
+    await page.locator('#file-changes').getByText('这是第一个提交版本。').waitFor();
+    await page.locator('#submission-tree').getByRole('button',{name:'report.pdf',exact:true}).click();
+    await page.getByRole('button',{name:'题目对照',exact:true}).click();
+    await page.locator('#artifact-pdf-canvas').waitFor();
+    assert.equal(await page.locator('#artifact-pdf-zoom').inputValue(),'page');
     await page.getByRole('tab',{name:'独立复审'}).click();
     await page.getByRole('button',{name:'report.pdf',exact:true}).click();
     await page.getByRole('button',{name:'关闭预览'}).click();
-    await page.getByRole('tab',{name:'对照审阅'}).click();
-    await page.locator('#artifact-choice').selectOption(project.path);
-    await page.getByRole('button',{name:'src/main.go',exact:true}).click();
+    await page.getByRole('tab',{name:'文件审阅'}).click();
+    await page.locator('#related-files summary').click();
+    await page.locator('#related-files').getByRole('button',{name:project.name,exact:true}).click();
+    await page.locator('#artifact-preview').getByRole('button',{name:'src/main.go',exact:true}).click();
     await page.locator('#artifact-preview pre').getByText('package main',{exact:true}).waitFor();
     assert.equal(new URL(await page.locator('#artifact-download').evaluate(a=>a.href)).searchParams.get('member'),member.member);
     await page.locator('#answer-back').click();
-    await page.getByRole('button',{name:'src/main.go',exact:true}).waitFor();
+    await page.locator('#artifact-preview').getByRole('button',{name:'src/main.go',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'问主写',exact:true}).getAttribute('aria-pressed'),'true');
     await page.locator('#chat-text').fill('两个峰值的频率是如何确定的？');
     await page.getByRole('button',{name:'发送',exact:true}).click();
@@ -425,7 +458,9 @@ const {promisify} = require('node:util');
     assert.deepEqual(messages.at(-1).files,failed.files);
     task.revision=1;
     task.status='awaiting';await signalState();
-    await page.getByRole('link', {name: '编辑报告正文', exact: true}).click();
+    await page.locator('#tab-delivery').click();
+    await page.locator('#submission-tree').getByRole('button',{name:'report.pdf',exact:true}).click();
+    await page.locator('#report-edit').click();
     await page.locator('#paper .report-block').first().waitFor();
     assert.equal(electron.windows().length, 1);
     assert.equal(await page.locator('#return-task').getAttribute('href'), '/#view=task&id='+taskID);
@@ -464,6 +499,22 @@ const {promisify} = require('node:util');
     task.revision = 2; task.status = 'awaiting'; await signalState();
     await page.locator('#stale').filter({hasText: '第 2 版'}).waitFor();
     assert.equal(await page.locator('#submit-open').isHidden(), true);
+    published = 2;
+    await page.locator('#return-task').click();
+    await page.locator('#submission-tree').getByRole('button',{name:'src/main.go',exact:true}).click();
+    await page.getByRole('button',{name:'版本改动',exact:true}).click();
+    await page.locator('#file-changes .added-line').getByText('+ package main',{exact:true}).waitFor();
+    await page.locator('#submission-tree').getByRole('button',{name:'report.pdf',exact:true}).click();
+    await page.locator('#before-pdf-canvas').waitFor(); await page.locator('#after-pdf-canvas').waitFor();
+    await page.locator('#submission-tree').getByRole('button',{name:'tools/main.go',exact:true}).click();
+    await page.locator('#file-changes').getByText('两版文件内容相同。').waitFor();
+    await page.getByRole('button',{name:'文件内容',exact:true}).click();
+    await page.locator('#edit-text').click();
+    assert.equal(await page.locator('#text-edit-content').inputValue(),'package tools');
+    await page.locator('#text-edit-content').fill('package revised');
+    await page.locator('#text-edit-send').click();
+    await page.locator('#text-edit-dialog').waitFor({state:'hidden'});
+    assert.equal(fileEdit.name,'tools/main.go'); assert.equal(fileEdit.revision,2); assert.equal(fileEdit.text,'package revised');
     await page.locator('.brand').click();
     await page.locator('[data-nav="settings"]').click();
     await page.getByRole('heading', {name: '后台与连接', exact: true}).waitFor();

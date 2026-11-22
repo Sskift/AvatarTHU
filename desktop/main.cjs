@@ -180,7 +180,7 @@ if (!app.requestSingleInstanceLock({route: lastRoute, hidden: process.argv.inclu
     protocol.handle('avatarthu', async request => {
       if (!bridge.internalURL(request.url) || !['GET', 'POST', 'HEAD'].includes(request.method)) return new Response('Forbidden', {status: 403});
       const url = new URL(request.url);
-      const uiFiles = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace-review.js': 'workspace_review.js', '/workspace.css': 'workspace_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css'};
+      const uiFiles = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace-files.js': 'workspace_files.js', '/workspace-review.js': 'workspace_review.js', '/workspace.css': 'workspace_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css'};
       if (uiFiles[url.pathname] && request.method === 'GET') {
         const file = uiFiles[url.pathname], directory = app.isPackaged ? path.join(process.resourcesPath, 'ui') : path.join(__dirname, '../internal/app');
         return new Response(await fs.readFile(path.join(directory, file)), {headers: {

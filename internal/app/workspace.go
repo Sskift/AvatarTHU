@@ -394,6 +394,7 @@ func (a *App) workspaceTask(id string) M {
 			for _, artifact := range objects(r["artifacts"]) {
 				p := str(artifact, "path")
 				if file := workspaceDeliveryFile(c, p, n); file != nil {
+					file["source_path"] = str(artifact, "source_path")
 					if selected, known := artifact["in_submission"].(bool); known {
 						file["submission_member"] = selected
 					}
@@ -401,6 +402,9 @@ func (a *App) workspaceTask(id string) M {
 				}
 			}
 			submission := workspaceDeliveryFile(c, str(r, "submission"), n)
+			if submission != nil {
+				submission["sha256"] = str(r, "sha256")
+			}
 			if len(files) > 0 || submission != nil {
 				notes := r["revision_notes"]
 				if p := obj(r, "presentation"); len(p) != 0 {
@@ -502,6 +506,15 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			result = rows
 		case r.Method == "GET" && action == "directory":
 			result = a.workspaceDirectory(a.workspaceCourse(r.URL.Query().Get("course")), r.URL.Query().Get("path"))
+		case r.Method == "GET" && action == "task" && len(parts) == 5 && (parts[4] == "submission-tree" || parts[4] == "file-change"):
+			st := readMap(a.taskPath(parts[3]))
+			n, err := strconv.Atoi(r.URL.Query().Get("revision"))
+			ensure(len(st) != 0 && err == nil && n > 0 && reviewVersion(st, n) != nil, "找不到该版提交件")
+			if parts[4] == "submission-tree" {
+				result = a.workspaceSubmissionTree(st, n)
+			} else {
+				result = a.workspaceFileChange(st, n, r.URL.Query().Get("name"))
+			}
 		case r.Method == "GET" && action == "task" && len(parts) == 5 && parts[4] == "activity":
 			st := readMap(a.taskPath(parts[3]))
 			ensure(len(st) > 0, "找不到这份作业")
@@ -509,6 +522,11 @@ func (a *App) workspaceAPI(w http.ResponseWriter, r *http.Request) bool {
 			result = M{"id": parts[3], "revision": st["revision"], "status": st["status"], "updated_at": st["updated_at"],
 				"timeline": a.workspaceTimeline(st, conversation), "conversation": conversation}
 		case r.Method == "GET" && action == "task" && len(parts) == 4:
+			result = a.workspaceTask(parts[3])
+		case r.Method == "POST" && action == "task" && len(parts) == 5 && parts[4] == "file-edit":
+			var in workspaceTextEdit
+			check(decodeWorkspaceJSON(w, r, &in))
+			a.acceptWorkspaceText(parts[3], in)
 			result = a.workspaceTask(parts[3])
 		case r.Method == "POST" && action == "task" && len(parts) == 5 && parts[4] == "conversation":
 			var in conversationRequest

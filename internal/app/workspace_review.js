@@ -2,7 +2,7 @@
 
 const readerIDs = {
  prompt: {choice: 'prompt-choice', body: 'prompt-preview'},
- answer: {choice: 'artifact-choice', body: 'artifact-preview'}
+ answer: {body: 'artifact-preview'}
 };
 let reading = null;
 
@@ -11,7 +11,7 @@ class ReviewReading {
   this.key = key;
   try { this.state = JSON.parse(localStorage.getItem(this.key)); } catch {}
   if (!this.state || typeof this.state !== 'object') this.state = {};
-  if (!['both', 'prompt', 'answer'].includes(this.state.layout)) this.state.layout = 'both';
+  if (!['both', 'prompt', 'answer', 'changes'].includes(this.state.layout)) this.state.layout = 'both';
   if (!Array.isArray(this.state.bookmarks)) this.state.bookmarks = [];
   this.pairs = new Map();
  }
@@ -28,6 +28,7 @@ class ReviewReading {
 function closeComparison() {
  if (!reading) return;
  reading.save();
+ clearFileChanges();
  for (const {body} of Object.values(readerIDs)) closeFileSurface($(body));
  reading = null;
 }
@@ -37,58 +38,38 @@ function taskPrompts(task) {
  if (task.description) files.push({path: '', name: '学堂作业说明', text: task.description});
  return files;
 }
-function answerOptions(revision) {
- if (!revision) return [];
- const files = revision.files || [];
- const actual = files.filter(file => file.submission_member !== false);
- const extra = files.filter(file => file.submission_member === false);
- const groups = [[actual.some(f => f.submission_member !== true) ? '交付文件' : '提交文件', actual]];
- if (revision.submission && !files.some(file => file.path === revision.submission.path))
-  groups.push(['本版提交文件', [revision.submission]]);
- groups.push(['编辑与展示文件', extra]);
- return groups;
-}
 function defaultPrompt(files) {
  const attachments = files.filter(f => f.path && !/^readme\.md$/i.test(f.name));
  return attachments.find(f => /\.pdf$/i.test(f.name)) || attachments[0] || files.find(f => !f.path) || files[0];
-}
-function defaultAnswer(groups) {
- const files = groups.find(([, files]) => files.length)?.[1] || [];
- return files.find(f => /\.pdf$/i.test(f.name)) || files.find(f => /\.(html?|md|txt|png|jpe?g|webp)$/i.test(f.name)) || files[0];
 }
 function selectReadingFile(side, path, member = '') {
  reading.state[side] = {path, member, page: 1, zoom: 'fit', top: 0, left: 0};
  reading.state.question = '';
  reading.changed();
 }
-function renderReader(side, groups, fallback) {
- const ids = readerIDs[side], choice = $(ids.choice), body = $(ids.body);
- const options = groups.filter(([, files]) => files.length).map(([name, files]) => {
-  const items = files.map(f => '<option value="' + esc(f.path) + '">' + esc(f.title || f.name) + '</option>').join('');
-  return name ? '<optgroup label="' + esc(name) + '">' + items + '</optgroup>' : items;
- }).join('');
- if (choice.optionsHTML !== options) { choice.innerHTML = options; choice.optionsHTML = options; }
- const root = groups.flatMap(([, files]) => files).find(f => f.path === reading.state[side]?.path) || fallback;
- choice.closest('.viewer-toolbar').hidden = !root;
- const back = $(side + '-back');
- back.hidden = true;
+function renderReader(side, root) {
+ const body = $(readerIDs[side].body), back = $(side + '-back');
+ const download = $(side === 'prompt' ? 'prompt-download' : 'artifact-download');
+ back.hidden = true; download.hidden = true;
  if (!root) {
   closeFileSurface(body);
-  body.innerHTML = empty(side === 'prompt' ? '学堂暂未提供原题或说明' : '还没有已发布的作答');
+  body.innerHTML = empty(side === 'prompt' ? '学堂暂未提供原题或说明' : reading.ready ? '暂无可预览的文件' : '正在读取提交件…');
   return;
  }
- if (reading.state[side]?.path !== root.path) selectReadingFile(side, root.path);
+ if (reading.state[side]?.path !== root.path) selectReadingFile(side, root.path, root.member);
  const position = reading.state[side];
- choice.value = root.path;
- const file = position.member ? {...root, member: position.member, name: position.member.split('/').pop()} : root;
- if (file.member) {
+ const file = position.member ? {...root, member:position.member, name:position.member.split('/').pop()} : root;
+ if (file.member && (side === 'prompt' || reading.row?.group === 'extra')) {
   back.hidden = false;
   back.textContent = '‹ 返回压缩包 · ' + file.member;
   back.onclick = () => { selectReadingFile(side, root.path); renderComparison(); };
  }
- const download = $(side === 'prompt' ? 'prompt-download' : 'artifact-download');
- download.hidden = !file.path || (side === 'answer' && !file.member && latestDelivery(taskDetail)?.submission?.path === file.path);
- if (file.path) download.href = fileURL(file);
+ download.hidden = !file.path;
+ if (file.path) download.href = fileURL(file.available === false ? {...file, member:''} : file);
+ if (side === 'answer') {
+  download.textContent = file.available === false ? '下载提交包 ↓' : '下载文件 ↓';
+  $('answer-caption').textContent = file.member || file.name;
+ }
  const session = previews.get(body);
  if (session?.position === position && session.file.text === file.text && session.file.size === file.size) return;
  const owner = reading;
@@ -101,19 +82,31 @@ function renderComparison() {
  const task = taskDetail, revision = latestDelivery(task);
  const key = 'assignment-reading:' + task.id + ':' + (revision?.revision || 0);
  if (reading?.key !== key) { closeComparison(); reading = new ReviewReading(key); }
- const layout = reading.state.layout;
+ const owner = reading;
+ loadReviewTree(owner, task, revision);
+ const row = owner.row, layout = owner.state.layout, changes = layout === 'changes' && row && row.group !== 'extra';
  $('reading-pair').dataset.layout = layout;
- for (const button of document.querySelectorAll('[data-layout]')) button.setAttribute('aria-pressed', String(button.dataset.layout === layout));
- const prompts = taskPrompts(task), groups = answerOptions(revision);
- $('answer-revision').textContent = revision ? '第 ' + revision.revision + ' 版' : '';
- const download = $('submission-download');
- download.hidden = !revision?.submission;
- if (revision?.submission) download.href = fileURL(revision.submission);
- $('prompt-download').hidden = !prompts.length;
- renderReader('prompt', [['', prompts]], defaultPrompt(prompts));
- const primary = revision?.submission;
- renderReader('answer', groups, primary && /\.pdf$/i.test(primary.name) ? primary : defaultAnswer(groups));
+ $('pane-delivery').dataset.layout = layout;
+ $('reading-pair').hidden = !!changes; $('file-changes').hidden = !changes;
+ for (const button of document.querySelectorAll('[data-layout]')) {
+  button.setAttribute('aria-pressed', String(button.dataset.layout === (layout === 'prompt' ? 'both' : layout)));
+  button.disabled = button.dataset.layout === 'changes' ? !row || row.group === 'extra' : row?.group === 'removed';
+ }
+ const prompts = taskPrompts(task), choice = $('prompt-choice');
+ const options = prompts.map(f => '<option value="' + esc(f.path) + '">' + esc(f.title || f.name) + '</option>').join('');
+ if (choice.optionsHTML !== options) { choice.innerHTML = options; choice.optionsHTML = options; }
+ const prompt = prompts.find(f => f.path === owner.state.prompt?.path) || defaultPrompt(prompts);
+ choice.closest('.viewer-toolbar').hidden = !prompt; if (prompt) choice.value = prompt.path;
+ $('focus-prompt').textContent = layout === 'prompt' ? '返回对照' : '只看原题';
+ $('answer-revision').textContent = row ? '第 ' + (row.group === 'removed' ? revision.revision-1 : revision.revision) + ' 版' : '';
+ $('answer-caption').textContent = '';
  $('cite-position').disabled = !task.conversation?.can_ask && !task.conversation?.can_send;
+ $('cite-position').hidden = !!changes || !row;
+ renderReader('prompt', prompt);
+ renderReader('answer', row?.file);
+ renderFileHeader(owner, revision);
+ if (changes) renderFileChanges(owner, revision);
+ else clearFileChanges();
  updateQuestionNav();
 }
 
@@ -204,11 +197,11 @@ function readingFiles() {
  }));
 }
 function updateQuestionNav() {
- if (!reading || !$('question-nav')) return;
+ if (!reading?.ready || !$('question-nav')) return;
  const nav = $('question-nav');
  const prompt = previews.get($('prompt-preview')), answer = previews.get($('artifact-preview'));
  nav.hidden = !prompt;
- $('mark-position').hidden = !prompt?.canBookmark || !answer?.canBookmark;
+ $('mark-position').hidden = !prompt?.canBookmark || !answer;
  const pairs = new Map();
  const indexed = Array.isArray(prompt?.marks) && (!answer || Array.isArray(answer.marks));
  const answers = uniqueQuestions(answer?.marks || []);
@@ -222,7 +215,8 @@ function updateQuestionNav() {
  if (indexed && !pairs.has(reading.state.question)) reading.state.question = '';
  reading.pairs = pairs;
  const selected = reading.state.question || '';
- const html = pairs.size ? '<span>按题对照</span>' + [...pairs].map(([key, pair]) => {
+ const matched = [...pairs.values()].filter(pair => pair.answer).length;
+ const html = pairs.size ? '<span>已对应 ' + matched + '/' + pairs.size + ' 题</span>'  + [...pairs].map(([key, pair]) => {
   const hint = !pair.answer && answer ? ' title="作答位置待定位" class="unpaired"' : '';
   return '<button type="button" data-question="' + esc(key) + '" aria-pressed="' + (key === selected) + '"' + hint + '>' + esc(pair.prompt.label) + '</button>';
  }).join('') : '<span>' + (indexed ? (answer ? '可分别翻阅原题与作答。' : '原题') : '正在查找题号…') + '</span>';
@@ -254,7 +248,7 @@ function openReadingMark() {
  const context = [];
  for (const [side, ids] of Object.entries(readerIDs)) {
   const session = previews.get($(ids.body));
-  if (!session?.canBookmark) return;
+  if (!session || (side === 'prompt' && !session.canBookmark)) return;
   const {page, zoom, top, left} = session.position;
   draft[side] = {manual: true, page, zoom, y: top, left};
   context.push((side === 'prompt' ? '原题' : '作答') + ' ' + (session.file.member || session.file.name) + (session.pdf ? ' 第 ' + page + ' 页' : ''));
@@ -279,7 +273,7 @@ function finishReadingMark(remove = false) {
  reading.state.question = remove ? '' : key;
  updateQuestionNav(); reading.save();
 }
-function citeReadingPosition() {
+function citeReadingPosition(kind) {
  const task = taskDetail, draft = draftFor(task);
  if (!reading || draft.sending) return;
  const input = $('chat-text'), pinned = pinnedDelivery(task);
@@ -297,15 +291,17 @@ function citeReadingPosition() {
   const label = side === 'prompt' ? '原题' : '第 ' + latestDelivery(task).revision + ' 版作答';
   locations.push(label + ' ' + (session.file.member || session.file.name) + (session.pdf ? ' 第 ' + session.position.page + ' 页' : ''));
  }
- if (!draft.text && !draft.files.length) draft.kind = task.conversation?.can_ask ? 'ask' : 'change';
- const answer = pinned?.files?.find(f => f.path === reading.state.answer?.path);
+ if (kind === 'change') draft.kind = 'change';
+ else if (!draft.text && !draft.files.length) draft.kind = task.conversation?.can_ask ? 'ask' : 'change';
+ const answer = pinned?.files?.find(f => f.path === reading.state.answer?.path) ||
+  (reading.row?.group === 'file' && pinned?.files?.find(f => f.submission_member !== false && (f.source_path || f.name).replace(/^final\//,'') === reading.row.name));
  if (answer && !draft.files.includes(answer.name)) {
   draft.files.push(answer.name);
   draft.fileRevision = pinned.revision;
  }
  draft.revision = task.revision;
  draft.id = ''; draft.error = '';
- draft.text = [draft.text.trimEnd(), locations.join(' · ')].filter(Boolean).join('\n') + '\n';
+ draft.text = [draft.text.trimEnd(), (kind === 'change' ? '请修改 ' : '') + locations.join(' · ')].filter(Boolean).join('\n') + '\n';
  input.value = draft.text;
  renderComposer(task);
  input.focus();
@@ -313,7 +309,7 @@ function citeReadingPosition() {
 }
 
 async function previewPDF(body, session, current) {
- const prefix = session.side === 'prompt' ? 'prompt-pdf-' : session.side === 'answer' ? 'artifact-pdf-' : 'pdf-';
+ const prefix = session.controlPrefix || (session.side === 'prompt' ? 'prompt-pdf-' : session.side === 'answer' ? 'artifact-pdf-' : 'pdf-');
  const control = key => body.querySelector('#' + prefix + key);
  body.innerHTML = '<div class="pdf-controls"><div class="pdf-pagination" id="' + prefix + 'pagination"><button id="' + prefix + 'prev" disabled>上一页</button><label><input id="' + prefix + 'page" type="number" min="1" value="1" aria-label="PDF 页码" disabled> / <span id="' + prefix + 'count">…</span></label><button id="' + prefix + 'next" disabled>下一页</button></div><select id="' + prefix + 'zoom" aria-label="PDF 缩放" disabled><option value="fit">适合宽度</option><option value="page">适合页面</option><option value="1">100%</option><option value="1.5">150%</option><option value="2">200%</option></select></div><div id="' + prefix + 'status" class="pdf-status" role="status">正在打开 PDF…</div><div class="pdf-page-wrap"><div class="pdf-sheet"><div class="pdf-location" hidden></div></div></div>';
  const lib = await import('/pdfjs/pdf.min.mjs');

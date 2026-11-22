@@ -25,7 +25,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-//go:embed editor_ui.html editor_ui.css editor_ui.js workspace_ui.html workspace_ui.css workspace_ui.js workspace_review.js desktop_ui.css desktop_ui.js pdfjs
+//go:embed editor_ui.html editor_ui.css editor_ui.js workspace_ui.html workspace_ui.css workspace_ui.js workspace_files.js workspace_review.js desktop_ui.css desktop_ui.js pdfjs
 var editorUI embed.FS
 
 var editorRequestID = regexp.MustCompile(`^[a-f0-9]{32}$`)
@@ -527,7 +527,7 @@ func (a *App) editorHandler(token, host string) http.Handler {
 			_, _ = w.Write(b)
 			return
 		}
-		static := map[string]string{"/": "workspace_ui.html", "/workspace.css": "workspace_ui.css", "/workspace.js": "workspace_ui.js", "/workspace-review.js": "workspace_review.js", "/editor": "editor_ui.html", "/editor.css": "editor_ui.css", "/editor.js": "editor_ui.js", "/desktop.css": "desktop_ui.css", "/desktop.js": "desktop_ui.js"}
+		static := map[string]string{"/": "workspace_ui.html", "/workspace.css": "workspace_ui.css", "/workspace.js": "workspace_ui.js", "/workspace-files.js": "workspace_files.js", "/workspace-review.js": "workspace_review.js", "/editor": "editor_ui.html", "/editor.css": "editor_ui.css", "/editor.js": "editor_ui.js", "/desktop.css": "desktop_ui.css", "/desktop.js": "desktop_ui.js"}
 		if file, ok := static[r.URL.Path]; ok && r.Method == "GET" {
 			b, _ := editorUI.ReadFile(file)
 			w.Header().Set("Content-Type", map[string]string{".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}[filepath.Ext(file)])

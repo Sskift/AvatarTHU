@@ -153,6 +153,13 @@ func (a *App) prepare(st M, job string) {
 		ensure(editorRequestID.MatchString(id), "无效编辑定稿编号")
 		copyTree(filepath.Join(a.editorDir(st), "requests", id, "manuscript"), filepath.Join(job, "owner-final"))
 	}
+	if edit := obj(st, "owner_file_edit"); number(edit, "revision", -1) == revision {
+		id := str(edit, "id")
+		ensure(editorRequestID.MatchString(id), "无效文件编辑编号")
+		source := filepath.Join(a.editorDir(st), "file-edits", id, "content.txt")
+		ensure(digest(source) == str(edit, "sha256"), "文件编辑定稿已改变")
+		copyFile(source, filepath.Join(job, "owner-file", "content.txt"))
+	}
 }
 func validateWriter(r M, job string) M {
 	_, ok := r["ready"].(bool)

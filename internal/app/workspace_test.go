@@ -73,7 +73,7 @@ func TestWorkspaceIgnoreAndRestore(t *testing.T) {
 func TestWorkspaceTaskActionsRequireLocalSession(t *testing.T) {
 	a, st := editorFixture(t)
 	before := digest(a.taskPath(str(st, "task_id")))
-	for _, action := range []string{"ignore", "restore", "revise"} {
+	for _, action := range []string{"ignore", "restore", "revise", "file-edit"} {
 		for _, origin := range []string{"", "https://untrusted.example"} {
 			req := httptest.NewRequest("POST", "http://127.0.0.1:7777/api/workspace/task/"+str(st, "task_id")+"/"+action, strings.NewReader("{}"))
 			want := http.StatusUnauthorized

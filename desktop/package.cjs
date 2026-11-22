@@ -18,7 +18,7 @@ const arg = name => process.argv[process.argv.indexOf(name) + 1];
     await fs.copyFile(backend, path.join(resources, path.basename(backend)));
     await fs.chmod(path.join(resources, path.basename(backend)), 0o755);
     const ui = path.join(tmp, 'ui'); await fs.mkdir(ui);
-    for (const name of ['workspace_ui.html', 'workspace_ui.js', 'workspace_review.js', 'workspace_ui.css', 'editor_ui.html', 'editor_ui.js', 'editor_ui.css', 'desktop_ui.js', 'desktop_ui.css']) {
+    for (const name of ['workspace_ui.html', 'workspace_ui.js', 'workspace_review.js', 'workspace_files.js', 'workspace_ui.css', 'editor_ui.html', 'editor_ui.js', 'editor_ui.css', 'desktop_ui.js', 'desktop_ui.css']) {
       await fs.copyFile(path.join(__dirname, '../internal/app', name), path.join(ui, name));
     }
     const paths = await packager({

@@ -242,19 +242,18 @@ function renderTask(t){
  const reportLink='<a class="button" href="/editor#task='+encodeURIComponent(t.id)+'">'+(t.has_report_source&&t.can_submit?'编辑报告正文':'打开报告草稿')+'</a>';
  const meta=[t.course,t.deadline?'截止 '+date(t.deadline):''].filter(Boolean).map(esc).join(' · ');
  $('task-meta').innerHTML='<span>'+meta+'</span>'+badge(phaseNames[t.status]||t.status,taskTone(t));
- $('task-links').innerHTML=t.has_report_source&&t.can_submit?reportLink:'';
+ $('task-links').replaceChildren();
  const tools=(doc?'<a class="button" href="'+doc+'" target="_blank" rel="noopener noreferrer">飞书审阅文档 ↗</a>':'')+
   (t.course_id?'<a class="button" href="'+esc(href('course',t.course_id))+'">查看课程</a>':'')+
-  (t.can_submit&&t.has_report_source?'':reportLink)+taskControls(t);
+  reportLink+taskControls(t);
  $('task-secondary').innerHTML=(history?disclosure('history','历史版本',history):'')+
   disclosure('tools','作业管理','<div class="actions">'+tools+'</div>');
- $('delivery-notes').innerHTML=revisionNotes(r);
  $('pipeline-status').innerHTML=workflowPanel(t);
  const reviewFiles=currentDelivery(t)?.files||[];
  $('pane-review').innerHTML='<div class="section-heading"><h2>第 '+esc(t.revision||1)+' 版独立复审</h2></div>'+
   reviewPanel(t,t.revision||1,reviewFiles,true);
  for(const el of document.querySelectorAll('#content details[data-section]'))el.open=expanded.has(el.dataset.section);
- setPane(selectedPane||(t.status==='failed'||active(t)?'workflow':'delivery'));
+ setPane(selectedPane||(!r&&(t.status==='failed'||active(t))?'workflow':'delivery'));
  renderActivity(t.timeline||[]);
  renderConversation(t);
 }
@@ -572,6 +571,7 @@ async function showFileSurface(body,file,options={}){
  const current=()=>body.isConnected&&previews.get(body)===session;
  previews.set(body,session);body.textContent='正在载入预览…';body.scrollTop=0;
  try{
+  if(file.available===false){body.innerHTML=empty('下载提交包可查看此文件');return;}
   const data=file.text!==undefined?{kind:'text',text:file.text}:await api('/preview?'+new URLSearchParams(fileQuery(file)));
   if(!current())return;
   body.replaceChildren();
@@ -582,6 +582,7 @@ async function showFileSurface(body,file,options={}){
    const img=document.createElement('img');img.alt=file.name;img.src=fileURL(file,true);body.append(img);
    await img.decode();if(!current())return;
   }else if(data.kind==='text'){
+   if(session.side==='answer'&&file.size<=256*1024)session.editText=data.text;
    if(session.side)showReviewText(body,session,data.text);
    else{const pre=document.createElement('pre');pre.textContent=data.text;body.append(pre);}
   }else if(data.kind==='zip'){
@@ -609,7 +610,7 @@ async function showFileSurface(body,file,options={}){
   }
  }catch(e){if(current())body.textContent='预览未能载入。'+e.message;}
  finally{
-  if(current()&&session.side&&!session.pdf){session.marks??=[];updateQuestionNav();}
+  if(current()&&session.side&&!session.pdf){session.marks??=[];updateQuestionNav();if(session.side==='answer')updateTextEditButton();}
  }
 }
 function previewFile(f,parent=null){
@@ -659,8 +660,8 @@ document.addEventListener('change',e=>{
   Object.assign(draftFor(taskDetail),{files,fileRevision:pinnedDelivery(taskDetail)?.revision,id:'',error:''});
   renderComposer(taskDetail);return;
  }
- if(e.target.id==='artifact-choice'||e.target.id==='prompt-choice'){
-  selectReadingFile(e.target.id==='prompt-choice'?'prompt':'answer',e.target.value);renderComparison();return;
+ if(e.target.id==='prompt-choice'){
+  selectReadingFile('prompt',e.target.value);renderComparison();return;
  }
  if(e.target.id==='task-filter'){taskFilter=e.target.value;renderCourseTasks();}
 });
