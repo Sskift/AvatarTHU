@@ -42,6 +42,15 @@ function defaultPrompt(files) {
  const attachments = files.filter(f => f.path && !/^readme\.md$/i.test(f.name));
  return attachments.find(f => /\.pdf$/i.test(f.name)) || attachments[0] || files.find(f => !f.path) || files[0];
 }
+function originalInArchive(entries, truncated) {
+ if (truncated) return null;
+ const documents = entries.map(entry => entry.file).filter(f => f && /\.(?:pdf|md|txt)$/i.test(f.name) &&
+  !/(?:答案|解答|模板|参考解|solution|answer|template)/i.test(f.name));
+ const named = documents.filter(f => /(?:题目|作业|习题|任务书|实验要求|assignment|homework|problem|questions?)/i.test(f.name));
+ if (named.length === 1) return named[0];
+ const pdfs = (named.length ? named : documents).filter(f => /\.pdf$/i.test(f.name));
+ return pdfs.length === 1 ? pdfs[0] : null;
+}
 function selectReadingFile(side, path, member = '') {
  reading.state[side] = {path, member, page: 1, zoom: 'fit', top: 0, left: 0};
  reading.state.question = '';
@@ -61,11 +70,12 @@ function renderReader(side, root) {
  const file = position.member ? {...root, member:position.member, name:position.member.split('/').pop()} : root;
  if (file.member && (side === 'prompt' || reading.row?.group === 'extra')) {
   back.hidden = false;
-  back.textContent = '‹ 返回压缩包 · ' + file.member;
-  back.onclick = () => { selectReadingFile(side, root.path); renderComparison(); };
+  back.textContent = '包目录'; back.title = '返回压缩包 · ' + file.member;
+  back.onclick = () => { selectReadingFile(side, root.path); reading.state[side].showArchive = true; renderComparison(); };
  }
  download.hidden = !file.path;
  if (file.path) download.href = fileURL(file.available === false ? {...file, member:''} : file);
+ if (side === 'prompt' && $('prompt-choice').selectedOptions[0]) $('prompt-choice').selectedOptions[0].textContent = file.member || root.title || root.name;
  if (side === 'answer') {
   download.textContent = file.available === false ? '下载提交包 ↓' : '下载文件 ↓';
   $('answer-caption').textContent = file.member || file.name;
@@ -75,6 +85,7 @@ function renderReader(side, root) {
  const owner = reading;
  showFileSurface(body, file, {
   position, side, changed: () => owner.changed(),
+  chooseMember: side === 'prompt' && !position.member && !position.showArchive ? originalInArchive : null,
   openMember: member => { selectReadingFile(side, root.path, member.member); renderComparison(); }
  });
 }

@@ -242,7 +242,6 @@ function renderTask(t){
  const reportLink='<a class="button" href="/editor#task='+encodeURIComponent(t.id)+'">'+(t.has_report_source&&t.can_submit?'编辑报告正文':'打开报告草稿')+'</a>';
  const meta=[t.course,t.deadline?'截止 '+date(t.deadline):''].filter(Boolean).map(esc).join(' · ');
  $('task-meta').innerHTML='<span>'+meta+'</span>'+badge(phaseNames[t.status]||t.status,taskTone(t));
- $('task-links').replaceChildren();
  const tools=(doc?'<a class="button" href="'+doc+'" target="_blank" rel="noopener noreferrer">飞书审阅文档 ↗</a>':'')+
   (t.course_id?'<a class="button" href="'+esc(href('course',t.course_id))+'">查看课程</a>':'')+
   reportLink+taskControls(t);
@@ -586,6 +585,8 @@ async function showFileSurface(body,file,options={}){
    if(session.side)showReviewText(body,session,data.text);
    else{const pre=document.createElement('pre');pre.textContent=data.text;body.append(pre);}
   }else if(data.kind==='zip'){
+   const original=session.chooseMember?.(data.entries||[],data.truncated);
+   if(original){session.openMember(original);return;}
    for(const entry of data.entries||[]){
     const row=document.createElement('div');row.className='zip-entry';
     const name=document.createElement(entry.file?'button':'span');name.textContent=entry.name;

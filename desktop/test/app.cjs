@@ -65,6 +65,8 @@ const {promisify} = require('node:util');
   const answerPDF = samplePDF([plot+'\n'+title(265,'1. Spectrum'), title(300,'2. Sampling')]);
   const material = {course_id: 'course1', course: '数字信号处理', name: 'lecture.pdf', path: 'courseware/lecture.pdf', kind: 'courseware', size: pdf.length};
   const prompt = {...material, name:'problems.pdf', path:'homework/lab1/workspace/source/problems.pdf', kind:'assignment', size:promptPDF.length};
+  const promptArchive = {...prompt, name:'materials.zip', path:prompt.path.replace('problems.pdf','materials.zip')};
+  const insidePrompt = {...prompt, path:promptArchive.path, member:'problems.pdf'};
   const report = {...material, name: 'report.pdf', path: 'homework/lab1/presentation/outputs/r1/report.pdf', kind: 'artifact', submission_member: true, size:answerPDF.length};
   const project = {...report, submission_member: false, name: 'analysis.zip', path: 'homework/lab1/presentation/outputs/r1/analysis.zip'};
   const member = {...project,name: 'main.go', member: 'src/main.go', size: 82};
@@ -84,7 +86,7 @@ const {promisify} = require('node:util');
     workflow: {writer:'codex',reviewer:'claude',feedback:lastRevision?.instruction,round:1},
     conversation:conversation(),timeline,description: '分析声音信号的频谱。', reviews: [{revision:1,round:1,reviewer:'claude',approved:true,summary:'频谱和实验记录相符。',
       comments:[{artifact:'report.pdf',location:'第 1 页',issue:'图中两处峰值与记录一致。'},{artifact:'analysis.zip',location:'src/main.go',issue:'空输入没有提示。',suggestion:'说明可用的输入格式。'}]}],
-    revisions: [{revision:published,files:[report,project],submission:bundleFor(published)}], attachments: [prompt]});
+    revisions: [{revision:published,files:[report,project],submission:bundleFor(published)}], attachments: [promptArchive]});
   const ui = path.resolve(__dirname, '../../internal/app');
   const files = {'/': 'workspace_ui.html', '/workspace.js': 'workspace_ui.js', '/workspace-files.js': 'workspace_files.js', '/workspace-review.js': 'workspace_review.js', '/workspace.css': 'workspace_ui.css', '/desktop.js': 'desktop_ui.js', '/desktop.css': 'desktop_ui.css', '/editor': 'editor_ui.html', '/editor.js': 'editor_ui.js', '/editor.css': 'editor_ui.css'};
   const server = http.createServer(async (req, res) => {
@@ -138,6 +140,8 @@ const {promisify} = require('node:util');
         return json(captured);
       }
       if (url.pathname === '/api/workspace/preview') {
+        if(url.searchParams.get('path')===promptArchive.path && !url.searchParams.has('member'))
+          return json({kind:'zip',entries:[{name:'signal.wav',size:500},{name:insidePrompt.member,size:insidePrompt.size,file:insidePrompt}]});
         if(url.searchParams.get('member')==='tools/main.go')return json({kind:'text',text:'package tools'});
         if(url.searchParams.get('member')===member.member)return json({kind:'text',text:'package main'});
         if(url.searchParams.get('path')===project.path)return json({kind:'zip',entries:[{name:member.member,size:member.size,file:member}]});
@@ -147,7 +151,7 @@ const {promisify} = require('node:util');
         res.setHeader('Content-Type', 'application/pdf');
         if (!url.searchParams.has('inline')) res.setHeader('Content-Disposition', 'attachment; filename="lecture.pdf"');
         const filename = url.searchParams.get('path');
-        res.end(filename === prompt.path ? promptPDF : filename === report.path || url.searchParams.get('member')==='report.pdf' ? answerPDF : pdf); return;
+        res.end(filename === promptArchive.path ? promptPDF : filename === report.path || url.searchParams.get('member')==='report.pdf' ? answerPDF : pdf); return;
       }
       if (url.pathname === '/api/workspace/task/' + taskID) return json(detail());
       if (url.pathname === '/api/workspace/task/' + taskID + '/submission-tree') return json(manifest(Number(url.searchParams.get('revision'))));
@@ -359,7 +363,9 @@ const {promisify} = require('node:util');
     assert.equal(await page.getByRole('button',{name:'第 3 题',exact:true}).getAttribute('title'),'作答位置待定位');
     await page.locator('#prompt-choice').selectOption('');
     await page.locator('#prompt-preview pre').getByText('分析声音信号的频谱。',{exact:true}).waitFor();
-    await page.locator('#prompt-choice').selectOption(prompt.path);
+    await page.locator('#prompt-choice').selectOption(promptArchive.path);
+    await page.locator('#prompt-back').click();
+    await page.locator('#prompt-preview').getByRole('button',{name:'problems.pdf',exact:true}).click();
     await page.getByRole('button',{name:'第 1 题',exact:true}).click();
     await page.waitForFunction(()=>document.getElementById('artifact-pdf-canvas')?.getAttribute('aria-label')==='PDF 第 1 页，共 2 页');
     if(screenshotDir)await page.screenshot({path:path.join(screenshotDir,'desktop-review.png')});

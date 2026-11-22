@@ -104,7 +104,7 @@ input:not([type=checkbox]),select,textarea {padding:8px 10px;border:1px solid va
 .file-row .actions {gap:5px}
 .file-row .actions :is(button,a) {padding:4px 8px;min-height:28px;font-size:12px}
 .directory-list .file-row,.directory-row {min-height:63px}
-.desk-heading {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding-bottom:18px;border-bottom:1px solid var(--line)}
+.desk-heading {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;padding-bottom:4px;border-bottom:1px solid var(--line)}
 #task-meta {display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:13px}
 .desk-heading .actions {gap:7px}
 .review-desk {display:grid;grid-template-columns:minmax(0,1.62fr) minmax(300px,1fr);gap:clamp(18px,2.2vw,34px);align-items:start}
@@ -253,8 +253,8 @@ dialog textarea {resize:vertical;min-height:80px}
 .review-desk[data-pane=delivery] {display:block}
 .review-desk[data-pane=delivery] .conversation {max-width:800px;margin:24px auto 0}
 .desk-navigation,.reading-tools,.reader-heading,.conversation-heading {display:flex;align-items:center}
-.desk-navigation {justify-content:space-between;flex-wrap:wrap;gap:4px 12px;border-bottom:1px solid var(--line)}
-.desk-navigation .task-panes {border:0}
+.desk-navigation {justify-content:space-between;flex-wrap:wrap;gap:4px 18px}
+.desk-navigation .task-panes {border:0;margin:0}
 .reading-tools {gap:14px;margin:6px 0}
 .conversation-heading {justify-content:space-between;gap:10px}
 .review-desk:not([data-pane=delivery]) :is(.reading-tools,#return-reading) {display:none}
@@ -290,13 +290,13 @@ dialog textarea {resize:vertical;min-height:80px}
 .pdf-sheet {position:relative;width:max-content;margin:0 auto}
 .pdf-location {position:absolute;left:0;right:0;height:1.2em;pointer-events:none;border-left:3px solid #925e30;background:#f5be5140}
 .text-location {background:#ffebbe;border-bottom:1px solid #966025}
-.archive-back {border:0;border-bottom:1px solid var(--line);border-radius:0;color:var(--purple);justify-content:flex-start;padding:4px 10px;min-height:28px;width:100%;font-size:12px;white-space:normal;overflow-wrap:anywhere}
+.archive-back {border:0;color:var(--purple);padding:2px 3px;min-height:24px;font-size:11px}
 @media(min-width:821px) {
- body:has(#review-desk[data-pane=delivery]) .sidebar {width:64px;padding-inline:8px}
- body:has(#review-desk[data-pane=delivery]) .shell {margin-left:64px;padding-inline:clamp(16px,2vw,30px)}
- body:has(#review-desk[data-pane=delivery]) .sidebar :is(.brand,nav a) {justify-content:center;gap:0;font-size:0}
- body:has(#review-desk[data-pane=delivery]) .brand {margin-inline:0}
- body:has(#review-desk[data-pane=delivery]) .sidebar-foot {text-align:center;font-size:0}
+ body:has(#review-desk) .sidebar {width:64px;padding-inline:8px}
+ body:has(#review-desk) .shell {margin-left:64px;padding-inline:clamp(16px,2vw,30px)}
+ body:has(#review-desk) .sidebar :is(.brand,nav a) {justify-content:center;gap:0;font-size:0}
+ body:has(#review-desk) .brand {margin-inline:0}
+ body:has(#review-desk) .sidebar-foot {text-align:center;font-size:0}
 }
 @media(max-width:680px) {
  .reading-pair[data-layout=both] {grid-template-columns:minmax(0,1fr)}
@@ -304,7 +304,7 @@ dialog textarea {resize:vertical;min-height:80px}
 }
 
 /* The submission directory stays beside the student's selected file. */
-.file-workbench {display:grid;grid-template-columns:clamp(185px,17vw,254px) minmax(0,1fr);align-items:start}
+.file-workbench {display:grid;grid-template-columns:clamp(185px,17vw,254px) minmax(0,1fr);align-items:stretch}
 .file-workbench:has(#review-file-list[hidden]) {grid-template-columns:minmax(0,1fr)}
 #review-file-list {position:sticky;top:16px;min-width:0;max-height:calc(100dvh - 46px);overflow:auto;padding:18px 12px 16px 0;border-right:1px solid var(--line);scrollbar-width:thin}
 #review-file-list header {display:flex;flex-direction:column;gap:2px;padding:0 8px 12px}
@@ -344,7 +344,7 @@ dialog textarea {resize:vertical;min-height:80px}
 .file-actions :is(a,button),#toggle-tree {color:var(--purple);font-size:12px;min-height:28px}
 .file-actions .button,.file-actions button,#toggle-tree {padding:3px 9px}
 #toggle-tree {background:transparent}
-.review-desk:not([data-pane=delivery]) #toggle-tree {display:none}
+body:has(#review-desk:not([data-pane=delivery])) #toggle-tree {display:none}
 .selected-file .reading-tools {justify-content:space-between;margin:12px 0 8px;border-bottom:1px solid var(--line)}
 .reading-layout {border:0;padding:0;gap:18px;border-radius:0;background:transparent}
 .reading-layout button,.reading-layout [aria-pressed=true] {border-radius:0;box-shadow:none;padding:6px 0 9px;min-height:32px;background:transparent}
@@ -354,12 +354,12 @@ dialog textarea {resize:vertical;min-height:80px}
 .question-tools {margin:6px 0}
 .reader .viewer-toolbar {height:39px;flex-wrap:nowrap}
 .reader .viewer-toolbar select {padding:3px 5px;min-height:25px;border:0;background:transparent;font-size:12px}
-.reader .file-caption {display:block;line-height:26px;font:500 12px/26px ui-monospace,SFMono-Regular,Consolas,monospace;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.reader .file-caption {flex:1;min-width:0;display:block;font:500 12px/26px ui-monospace,SFMono-Regular,Consolas,monospace;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .reader-heading {min-height:30px}
 .reader-heading h3 {font-size:13px}
 .reading-pair {gap:12px}
-.reader .preview-surface {height:clamp(300px,calc(100dvh - 438px),930px)}
-#pane-delivery[data-layout=answer] .reader .preview-surface {height:clamp(320px,calc(100dvh - 380px),980px)}
+.reader .preview-surface {height:clamp(300px,calc(100dvh - 382px),930px)}
+#pane-delivery[data-layout=answer] .reader .preview-surface {height:clamp(320px,calc(100dvh - 332px),980px)}
 #file-changes {min-height:250px}
 .change-heading {justify-content:flex-start;margin:16px 0 7px}
 .change-heading span {font-size:11px;color:var(--purple);background:var(--pale);border-radius:4px;padding:1px 6px}

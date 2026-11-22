@@ -41,9 +41,7 @@
  <div class="dialog-actions"><button type="button" data-close="text-edit-dialog">关闭草稿</button><button class="primary" id="text-edit-send" type="submit">交主写生成新版</button></div>
 </form></dialog>
 <template id="task-workspace">
- <div class="desk-heading"><div id="task-meta"></div><div class="actions" id="task-links"></div></div>
- <div class="review-desk" id="review-desk">
-  <div class="desk-delivery">
+ <div class="desk-heading"><div id="task-meta"></div>
    <div class="desk-navigation"><div class="task-panes" role="tablist" aria-label="作业内容">
     <button role="tab" id="tab-delivery" aria-controls="pane-delivery" data-pane="delivery">文件审阅</button>
     <button role="tab" id="tab-review" aria-controls="pane-review" data-pane="review">独立复审</button>
@@ -51,6 +49,9 @@
    </div>
     <button type="button" id="toggle-tree" aria-expanded="true" aria-controls="review-file-list">收起目录</button>
    </div>
+ </div>
+ <div class="review-desk" id="review-desk">
+  <div class="desk-delivery">
    <section id="pane-workflow" role="tabpanel" aria-labelledby="tab-workflow"><div id="pipeline-status"></div><ol id="activity-log" aria-label="Agent 工作记录"></ol><p id="activity-hint" class="quiet" role="status"></p></section>
    <section id="pane-delivery" role="tabpanel" aria-labelledby="tab-delivery" hidden>
     <div class="file-workbench">
@@ -75,15 +76,13 @@
       <div class="reading-pair" id="reading-pair">
        <section class="reader" id="prompt-reader" aria-labelledby="prompt-heading">
         <div class="reader-heading"><h3 id="prompt-heading">老师的原题</h3><a id="prompt-download" download>下载原件</a></div>
-        <div class="viewer"><div class="viewer-toolbar"><select id="prompt-choice" aria-label="选择题目或作业说明"></select><button type="button" id="focus-prompt">只看原题</button></div>
-         <button class="archive-back" id="prompt-back" hidden></button>
+        <div class="viewer"><div class="viewer-toolbar"><select id="prompt-choice" aria-label="选择题目或作业说明"></select><button class="archive-back" id="prompt-back" hidden></button><button type="button" id="focus-prompt">只看原题</button></div>
          <div class="preview-surface" id="prompt-preview" aria-label="原题预览"></div>
         </div>
        </section>
        <section class="reader" id="answer-reader" aria-labelledby="answer-heading">
         <div class="reader-heading"><h3 id="answer-heading">我的作答</h3><small id="answer-revision"></small></div>
-        <div class="viewer"><div class="viewer-toolbar file-caption" id="answer-caption"></div>
-         <button class="archive-back" id="answer-back" hidden></button>
+        <div class="viewer"><div class="viewer-toolbar"><span class="file-caption" id="answer-caption"></span><button class="archive-back" id="answer-back" hidden></button></div>
          <div class="preview-surface" id="artifact-preview" aria-label="作答预览"></div>
         </div>
        </section>
