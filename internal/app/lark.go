@@ -20,7 +20,11 @@ func (a *App) lark(args ...string) M {
 	return a.cliJSON(findExecutable("lark-cli", str(a.config(), "lark_cli")), args...)
 }
 func (a *App) larkArgs(args ...string) []string {
-	if profile := str(a.config(), "lark_profile"); profile != "" {
+	return larkProfileArgs(str(a.config(), "lark_profile"), args...)
+}
+
+func larkProfileArgs(profile string, args ...string) []string {
+	if profile != "" {
 		return append(append([]string{}, args...), "--profile", profile)
 	}
 	return args
@@ -216,12 +220,7 @@ func (a *App) resendReview(tid string) {
 		st["resend_request"] = request
 		a.saveTask(st)
 	}
-	card := assignmentCard(st)
-	if str(readMap(a.data("actions-health.json")), "state") != "ready" || str(readMap(a.data("messages-health.json")), "state") != "ready" {
-		body := obj(card, "body")
-		body["elements"] = append([]M{md("**连接提示：**回调尚未就绪。现在可以打开审阅文档；提交和修改按钮请等菜单栏显示飞书已连接后再操作。")}, objects(body["elements"])...)
-	}
-	receipt := a.send(card, "resend:"+str(request, "id"))
+	receipt := a.send(a.reviewCard(st), "resend:"+str(request, "id"))
 	history := objects(st["card_history"])
 	if old := obj(obj(st, "deliveries"), "card"); len(old) > 0 {
 		history = append(history, old)
@@ -234,6 +233,14 @@ func (a *App) resendReview(tid string) {
 	a.saveTask(st)
 	fmt.Println("已补发当前版本作业卡片，附最新审阅文档：" + str(review, "url"))
 }
+func (a *App) reviewCard(st M) M {
+	card := assignmentCard(st)
+	if str(readMap(a.data("actions-health.json")), "state") != "ready" {
+		body := obj(card, "body")
+		body["elements"] = append([]M{md("发卡时飞书回调尚未就绪。可先打开审阅文档。连接恢复后，若作业仍待确认，请在本版卡片操作。")}, objects(body["elements"])...)
+	}
+	return card
+}
 func (a *App) deliver(st M) {
 	a.publishLocal(st)
 	if !a.enabled() {
@@ -245,7 +252,7 @@ func (a *App) deliver(st M) {
 	a.publishCloud(st)
 	deliveries := obj(st, "deliveries")
 	if len(obj(deliveries, "card")) == 0 {
-		r := a.send(assignmentCard(st), fmt.Sprintf("%s:%d:card", str(st, "task_id"), number(st, "revision", 1)))
+		r := a.send(a.reviewCard(st), fmt.Sprintf("%s:%d:card", str(st, "task_id"), number(st, "revision", 1)))
 		deliveries["card"] = r
 		st["deliveries"] = deliveries
 		st["card_message_id"] = r["message_id"]
@@ -277,7 +284,7 @@ func (a *App) refreshCard(st M) {
 		return
 	}
 	a.publishCloud(st)
-	a.lark("im", "messages", "patch", "--as", "bot", "--message-id", str(st, "card_message_id"), "--data", string(jsonBytes(M{"content": string(jsonBytes(assignmentCard(st)))})))
+	a.lark("im", "messages", "patch", "--as", "bot", "--message-id", str(st, "card_message_id"), "--data", string(jsonBytes(M{"content": string(jsonBytes(a.reviewCard(st)))})))
 	st["links_synced"] = true
 	a.saveTask(st)
 }

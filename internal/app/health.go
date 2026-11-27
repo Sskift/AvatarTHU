@@ -116,5 +116,5 @@ func (a *App) listenerFailed(name string, err error) time.Duration {
 func (a *App) reconnectLark() {
 	ensure(a.enabled(), "飞书未启用，请先运行 avatarthu login lark")
 	writeJSON(a.data("lark-reconnect.json"), M{"request_id": randomID(12), "requested_at": stamp()})
-	fmt.Println("已请求重连飞书；后台将在 15 秒内重启 AvatarTHU 自己的两个监听。连接成功前保留异常提示，不会停止其他程序或其他设备的连接。")
+	fmt.Println("已请求重连飞书。后台将重新订阅卡片回调和消息，并在长连接恢复后更新状态。")
 }

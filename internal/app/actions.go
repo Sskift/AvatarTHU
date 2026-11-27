@@ -246,11 +246,9 @@ func (a *App) message(event M) bool {
 	a.send(receiptCard("修改已排队", str(st, "title"), "会自动处理并独立复审，完成后发给你。", true), "feedback:"+str(event, "message_id"))
 	return true
 }
-func (a *App) consume(ctx context.Context, key, name string, handler func(M) bool) {
-	exe := findExecutable("lark-cli", str(a.config(), "lark_cli"))
-	ensure(exe != "", "未找到 Lark CLI")
+func (a *App) consume(ctx context.Context, connection *larkConnection, key, name string, handler func(M) bool) {
 	// Closing stdin lets Lark unsubscribe cleanly before forced process cleanup.
-	cmd := command(context.WithoutCancel(ctx), append([]string{exe}, a.larkArgs("event", "consume", key, "--as", "bot")...)...)
+	cmd := command(context.WithoutCancel(ctx), connection.argv("event", "consume", key, "--as", "bot")...)
 	cmd.Dir = a.Root
 	input, e := cmd.StdinPipe()
 	check(e)
@@ -303,9 +301,7 @@ func (a *App) consume(ctx context.Context, key, name string, handler func(M) boo
 					diagnostics.WriteString(kept[len(kept)-16384:])
 				}
 				diagnostics.WriteString(line + "\n")
-				if strings.Contains(line, "[event] ready ") {
-					writeJSON(health, M{"state": "ready", "pid": cmd.Process.Pid, "time": stamp(), "last_ready_at": stamp(), "consecutive_failures": 0})
-				}
+				connection.observe(name, key, cmd.Process.Pid, line)
 				fmt.Fprintln(os.Stderr, safeError(line))
 			}
 		}); e != nil {
@@ -328,6 +324,7 @@ func (a *App) consume(ctx context.Context, key, name string, handler func(M) boo
 	scanErr := scanner.Err()
 	e = cmd.Wait()
 	wg.Wait()
+	connection.unsubscribe(name)
 	if ctx.Err() == nil {
 		check(scanErr)
 		if e == nil {

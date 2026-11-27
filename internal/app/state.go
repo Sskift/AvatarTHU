@@ -74,7 +74,9 @@ func (a *App) session() string {
 	return strDefault(a.config(), "session", filepath.Join(a.Root, "session.json"))
 }
 func (a *App) enabled() bool {
-	m := a.config()
+	return larkEnabled(a.config())
+}
+func larkEnabled(m M) bool {
 	if _, ok := m["lark_enabled"]; ok {
 		return boolean(m, "lark_enabled")
 	}

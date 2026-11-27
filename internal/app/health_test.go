@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,22 @@ func TestMain(m *testing.M) {
 			fmt.Fprintln(os.Stderr, `{"ok":false,"error":{"message":"another event bus is already connected to this app (1 remote event connection(s) detected via API)"}}`)
 			os.Exit(2)
 		}
+		if mode == "connection" {
+			switch strings.Join(os.Args[1:], " ") {
+			case "api GET /open-apis/event/v1/connection --as bot --profile example":
+				fmt.Print(os.Getenv("AVATARTHU_TEST_CONNECTION_REPLY"))
+			case "event stop --json --profile example":
+				check(os.WriteFile("idle-bus-stop", []byte("requested"), 0600))
+				// A third-party consumer keeps the shared bus alive.
+				fmt.Println(`{"results":[{"status":"refused"}]}`)
+				os.Exit(2)
+			default:
+				os.Exit(4)
+			}
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, "[event] ready event_key=card.action.trigger")
+		fmt.Fprintln(os.Stderr, "[source] feishu-websocket: connected")
 		io.Copy(io.Discard, os.Stdin)
 		os.Exit(0)
 	}
@@ -95,7 +111,7 @@ func TestListenerConflictAndSuccessfulReconnect(t *testing.T) {
 	a.saveConfig(M{"lark_cli": exe, "lark_enabled": true, "lark_profile": "example"})
 	t.Setenv("AVATARTHU_TEST_EVENT_CLI", "conflict")
 	err = attempt(func() {
-		a.consume(a.Ctx, "card.action.trigger", "actions", func(M) bool { t.Error("unexpected event"); return false })
+		a.consume(a.Ctx, newLarkConnection(a, a.config()), "card.action.trigger", "actions", func(M) bool { t.Error("unexpected event"); return false })
 	})
 	if err == nil || !strings.Contains(err.Error(), "another event bus") {
 		t.Fatalf("lost child diagnostic: %v", err)
@@ -121,7 +137,9 @@ func TestListenerConflictAndSuccessfulReconnect(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- attempt(func() { a.consume(ctx, "card.action.trigger", "actions", func(M) bool { return false }) })
+		done <- attempt(func() {
+			a.consume(ctx, newLarkConnection(a, a.config()), "card.action.trigger", "actions", func(M) bool { return false })
+		})
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -142,6 +160,72 @@ func TestListenerConflictAndSuccessfulReconnect(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("listener never became ready")
+}
+
+func TestLarkSocketHealthIsSharedAcrossActiveSubscriptions(t *testing.T) {
+	a := testApp(t)
+	c := newLarkConnection(a, M{})
+	health := func(name string) M { return readMap(a.data(name + "-health.json")) }
+	c.observe("actions", "card.action.trigger", 21, "[event] ready event_key=card.action.trigger")
+	if str(health("actions"), "state") != "connecting" {
+		t.Fatal("local subscription was mistaken for an online callback")
+	}
+	c.observe("actions", "card.action.trigger", 21, "[source] feishu-websocket: connected")
+	c.observe("messages", "im.message.receive_v1", 22, "[event] ready event_key=im.message.receive_v1")
+	lastReady := str(health("messages"), "last_ready_at")
+	if lastReady == "" || str(health("messages"), "state") != "ready" {
+		t.Fatal("late subscriber missed existing connection")
+	}
+	c.observe("messages", "im.message.receive_v1", 22, "[source] feishu-websocket: disconnected")
+	c.observe("actions", "card.action.trigger", 21, "[event] ready event_key=card.action.trigger")
+	c.observe("actions", "card.action.trigger", 21, "[source] feishu-websocket: reconnecting (attempt 2)")
+	if str(health("actions"), "state") != "reconnecting" || str(health("messages"), "state") != "reconnecting" || str(health("messages"), "last_ready_at") != lastReady {
+		t.Fatal("disconnect was lost while consumers stayed alive")
+	}
+	c.unsubscribe("messages")
+	c.observe("actions", "card.action.trigger", 21, "[source] feishu-websocket: connected")
+	if str(health("actions"), "state") != "ready" || str(health("messages"), "state") == "ready" {
+		t.Fatal("recovery should apply only to subscribed listeners")
+	}
+}
+
+func TestLarkChecksPlatformBeforeReconnectingIdleBus(t *testing.T) {
+	a := testApp(t)
+	exe, err := os.Executable()
+	check(err)
+	c := newLarkConnection(a, M{"lark_cli": exe, "lark_profile": "example"})
+	t.Setenv("AVATARTHU_TEST_EVENT_CLI", "connection")
+	c.observe("actions", "card.action.trigger", 21, "[event] ready event_key=card.action.trigger")
+	now := time.Now()
+	t.Setenv("AVATARTHU_TEST_CONNECTION_REPLY", `{"ok":true,"data":{"online_instance_cnt":1}}`)
+	if c.needsReconnect(a.Ctx, now) || c.state != "ready" {
+		t.Fatal("could not verify an existing connection")
+	}
+	t.Setenv("AVATARTHU_TEST_CONNECTION_REPLY", `{"ok":true,"data":{}}`)
+	if c.needsReconnect(a.Ctx, now.Add(5*time.Minute)) || c.state != "ready" {
+		t.Fatal("missing count was treated as an offline connection")
+	}
+	t.Setenv("AVATARTHU_TEST_CONNECTION_REPLY", `{"ok":true,"data":{"online_instance_cnt":0}}`)
+	lost := now.Add(10 * time.Minute)
+	if c.needsReconnect(a.Ctx, lost) || c.state != "reconnecting" {
+		t.Fatal("give the SDK time to reconnect after the first zero")
+	}
+	if c.needsReconnect(a.Ctx, lost.Add(15*time.Second)) || !c.needsReconnect(a.Ctx, lost.Add(time.Minute)) {
+		t.Fatal("persistent offline connection did not request repair")
+	}
+	c.stopIdleBus(a.Ctx)
+	if !exists(filepath.Join(a.Root, "idle-bus-stop")) {
+		t.Fatal("expected an unforced stop for this profile")
+	}
+	c.observe("actions", "card.action.trigger", 21, "[source] feishu-websocket: disconnected")
+	t.Setenv("AVATARTHU_TEST_CONNECTION_REPLY", `{"ok":true,"data":{"online_instance_cnt":1}}`)
+	if c.needsReconnect(a.Ctx, lost.Add(2*time.Minute)) || c.state != "reconnecting" {
+		t.Fatal("another online instance should not mask a reported disconnect")
+	}
+	c.unsubscribe("actions")
+	if c.needsReconnect(a.Ctx, lost.Add(10*time.Minute)) || c.state != "connecting" {
+		t.Fatal("detached listeners should not claim the bus is online or restart it")
+	}
 }
 
 func TestListenerFailureBackoffAndCategories(t *testing.T) {

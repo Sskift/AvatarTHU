@@ -323,7 +323,7 @@ func (a *App) maintenanceLoop(ctx context.Context) {
 		}
 	}
 }
-func (a *App) startListeners(parent context.Context) func() {
+func (a *App) startListeners(parent context.Context, connection *larkConnection) func() {
 	ctx, cancel := context.WithCancel(parent)
 	var workers sync.WaitGroup
 	for _, name := range []string{"actions", "messages"} {
@@ -336,7 +336,7 @@ func (a *App) startListeners(parent context.Context) func() {
 				handler, key = a.message, "im.message.receive_v1"
 			}
 			for ctx.Err() == nil {
-				e := attempt(func() { a.consume(ctx, key, name, handler) })
+				e := attempt(func() { a.consume(ctx, connection, key, name, handler) })
 				delay := time.Minute
 				if e != nil && ctx.Err() == nil {
 					delay = a.listenerFailed(name, e)
@@ -355,23 +355,43 @@ func (a *App) startListeners(parent context.Context) func() {
 func (a *App) eventManager(ctx context.Context) {
 	stop := func() {}
 	defer func() { stop() }()
-	activeKey := ""
+	activeKey, lastRequest := "", ""
+	var connection *larkConnection
+	var nextRepair time.Time
 	timer := time.NewTicker(15 * time.Second)
 	defer timer.Stop()
 	for {
-		key := ""
-		if a.enabled() {
-			cfg := a.config()
-			key = str(cfg, "lark_cli") + ":" + str(cfg, "lark_user_id") + ":" + str(cfg, "lark_profile") + ":" + str(readMap(a.data("lark-reconnect.json")), "request_id")
+		cfg := a.config()
+		key, request := "", ""
+		if larkEnabled(cfg) {
+			key = str(cfg, "lark_cli") + ":" + str(cfg, "lark_user_id") + ":" + str(cfg, "lark_profile")
+			request = str(readMap(a.data("lark-reconnect.json")), "request_id")
 		}
-		if key != activeKey {
+		reconnect := false
+		if key == activeKey && connection != nil {
+			now := time.Now()
+			reconnect = request != lastRequest || connection.needsReconnect(ctx, now) && !now.Before(nextRepair)
+		}
+		if key != activeKey || reconnect {
 			stop()
 			stop = func() {}
+			if ctx.Err() != nil {
+				return
+			}
+			if reconnect {
+				connection.stopIdleBus(ctx)
+				nextRepair = time.Now().Add(5 * time.Minute)
+			} else {
+				nextRepair = time.Time{}
+			}
 			activeKey = key
+			connection = nil
 			if key != "" {
-				stop = a.startListeners(ctx)
+				connection = newLarkConnection(a, cfg)
+				stop = a.startListeners(ctx, connection)
 			}
 		}
+		lastRequest = request
 		select {
 		case <-ctx.Done():
 			return

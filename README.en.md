@@ -349,7 +349,9 @@ Submission packages use one archive layer. The writer explicitly selects the min
 
 ## Execution errors and recovery
 
-The App settings and `avatarthu status` show the reason for a failed Feishu connection, consecutive failures, and the next retry time. App connection conflicts, authorization, permissions, and CLI version errors retry every 15 minutes. Temporary disconnections back off through 1, 2, 4, 8, and 15 minutes. Choose “重连飞书” in settings or run `avatarthu reconnect lark` after resolving the cause. The error remains visible until the listener actually becomes ready.
+The App settings and `avatarthu status` show the connection state for card callbacks and messages. When the Feishu WebSocket disconnects, both show that they are reconnecting. The backend checks Feishu’s online connection count and re-establishes a persistently offline connection. To reconnect manually, choose “重连飞书” in settings or run `avatarthu reconnect lark`. If a card reports that the callback is offline, check the assignment after reconnection. Click the current card again only if the assignment is still awaiting approval. For an unknown submission result, check the receipt in Web Learning.
+
+When a listener process exits, its status includes the reason, consecutive failures, and next retry time. Connection conflicts, authorization, permission, and CLI version errors retry every 15 minutes. Temporary failures back off from 1 to 15 minutes.
 
 If another program or device already listens on the same Feishu app, stop that listener or select a Lark CLI profile for a different app:
 
